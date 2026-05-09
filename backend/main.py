@@ -312,12 +312,10 @@ def rebuild_dnsmasq_blocklist():
     BLOCKED_DOMAINS_FILE.parent.mkdir(parents=True, exist_ok=True)
     BLOCKED_DOMAINS_FILE.write_text("\n".join(lines) + "\n")
 
-    # FIX: reload seul ne relit pas conf-file sur tous les systèmes — forcer restart si reload échoue
-    rc, _, _ = run_cmd("systemctl reload dnsmasq 2>/dev/null")
-    if rc != 0:
-        run_cmd("systemctl restart dnsmasq 2>/dev/null")
-    # Laisser dnsmasq traiter le signal avant de retourner
-    import time as _time; _time.sleep(0.5)
+    # Toujours restart (pas reload) — reload ne relit pas conf-file de manière fiable
+    # et ne vide pas le cache DNS (crucial pour le déblocage)
+    run_cmd("systemctl restart dnsmasq 2>/dev/null")
+    import time as _time; _time.sleep(1)
 
 def rebuild_hostapd_conf(ssid: str, passphrase: str, channel: int, country: str, ap_if: str = "wlan0"):
     """Réécrit le fichier hostapd.conf et redémarre le hotspot."""
@@ -355,7 +353,9 @@ server=1.1.1.1
 server=8.8.8.8
 server=9.9.9.9
 cache-size=1000
-neg-ttl=60
+local-ttl=0
+neg-ttl=0
+no-negcache
 dhcp-range={dhcp_start},{dhcp_end},255.255.255.0,12h
 dhcp-option=option:router,{ap_ip}
 dhcp-option=option:dns-server,{ap_ip}
@@ -629,6 +629,9 @@ async def update_device(mac: str, update: DeviceUpdate, auth=Depends(verify_toke
         device["blocked"] = update.blocked
         block_device_mac(mac, update.blocked)
         save_iptables()
+        if not update.blocked:
+            # Déblocage : restart dnsmasq pour vider le cache → réponses propres immédiatement
+            run_cmd("systemctl restart dnsmasq 2>/dev/null")
     if update.paused   is not None:
         device["paused"] = update.paused
         pause_device_mac(mac, update.paused)
@@ -649,6 +652,14 @@ async def update_device(mac: str, update: DeviceUpdate, auth=Depends(verify_toke
     devices[mac] = device
     save_json(DEVICES_FILE, devices)
     return device
+
+@app.post("/api/dns/flush-cache")
+async def flush_dns_cache(auth=Depends(verify_token)):
+    """Vide le cache DNS de dnsmasq — à appeler après tout déblocage."""
+    run_cmd("systemctl restart dnsmasq 2>/dev/null")
+    import time as _t; _t.sleep(1)
+    rc, _, _ = run_cmd("systemctl is-active dnsmasq 2>/dev/null")
+    return {"ok": rc == 0, "message": "Cache DNS vidé — les appareils verront le changement immédiatement"}
 
 @app.post("/api/devices/{mac}/kick")
 async def kick_device(mac: str, auth=Depends(verify_token)):
