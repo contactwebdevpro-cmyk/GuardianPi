@@ -4,7 +4,7 @@
 
 GuardianPi transforme un Raspberry Pi 3B en **point d'accès WiFi** avec contrôle parental complet.
 Les téléphones et tablettes se connectent au réseau "GuardianPi" → le filtrage est automatique, **aucune configuration DNS manuelle nécessaire**.
-
+curl -L https://raw.githubusercontent.com/contactwebdevpro-cmyk/GuardianPi/main/scripts/install.sh | sudo bash
 ---
 
 ## 🔑 Pourquoi le Mode Hotspot ?
