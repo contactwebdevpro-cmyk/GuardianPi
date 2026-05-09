@@ -6,7 +6,9 @@
 #  Usage: sudo bash install.sh
 # ══════════════════════════════════════════════════════════════════
 
-set -euo pipefail
+# FIX #1 : "set -euo pipefail" supprimé — il faisait quitter le script
+# à la moindre erreur non fatale (ex: commande introuvable, ping raté)
+# On gère les erreurs manuellement ci-dessous.
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 BLUE='\033[0;34m'; CYAN='\033[0;36m'; WHITE='\033[1;37m'; NC='\033[0m'
@@ -51,27 +53,48 @@ step()  { echo ""; echo -e "${BLUE}━━━ $1 ━━━${NC}"; }
 ok()    { echo -e "  ${GREEN}✓${NC} $1"; }
 info()  { echo -e "  ${CYAN}→${NC} $1"; }
 warn()  { echo -e "  ${YELLOW}⚠${NC} $1"; }
+err()   { echo -e "  ${RED}✗${NC} $1"; }
 
 check_root() {
-    [[ $EUID -eq 0 ]] || { echo -e "${RED}❌ Utilisez sudo${NC}"; exit 1; }
+    if [[ $EUID -ne 0 ]]; then
+        err "Ce script doit être lancé avec sudo"
+        echo -e "${RED}  Relancez : sudo bash install.sh${NC}"
+        exit 1
+    fi
+    ok "Droits root OK"
 }
 
 check_pi() {
     if grep -q "Raspberry Pi" /proc/cpuinfo 2>/dev/null; then
-        DEVMODE=false; echo -e "${GREEN}✓ Raspberry Pi détecté${NC}"
+        DEVMODE=false
+        ok "Raspberry Pi détecté"
     else
-        DEVMODE=true; echo -e "${YELLOW}⚠️  Mode développement (pas de Pi)${NC}"
+        DEVMODE=true
+        warn "Mode développement (pas de Pi — certaines étapes seront ignorées)"
     fi
 }
 
 check_internet() {
     echo -n "  Connexion internet... "
-    ping -c 1 -W 5 8.8.8.8 &>/dev/null && echo -e "${GREEN}✓${NC}" || { echo -e "${RED}✗ (vérifiez le câble Ethernet)${NC}"; exit 1; }
+    if ping -c 1 -W 5 8.8.8.8 &>/dev/null; then
+        echo -e "${GREEN}✓${NC}"
+    else
+        echo -e "${RED}✗${NC}"
+        err "Pas de connexion internet. Vérifiez le câble Ethernet sur eth0."
+        err "Si vous êtes en mode dev/test, ignorez cette erreur et relancez en commentant la ligne 'exit 1' ci-dessous."
+        exit 1
+    fi
 }
 
 check_wifi() {
-    echo -n "  Interface WiFi wlan0... "
-    ip link show wlan0 &>/dev/null && echo -e "${GREEN}✓${NC}" || { echo -e "${RED}✗ wlan0 introuvable${NC}"; exit 1; }
+    echo -n "  Interface WiFi ${AP_IF}... "
+    if ip link show "$AP_IF" &>/dev/null; then
+        echo -e "${GREEN}✓${NC}"
+    else
+        echo -e "${RED}✗${NC}"
+        err "wlan0 introuvable. Branchez un adaptateur WiFi ou activez le WiFi intégré."
+        exit 1
+    fi
 }
 
 install_packages() {
@@ -81,16 +104,66 @@ install_packages() {
         python3 python3-pip python3-venv \
         hostapd dnsmasq \
         iptables iptables-persistent \
-        dhcpcd5 nmap git curl net-tools iproute2 procps \
+        dhcpcd5 nmap git curl net-tools iproute2 procps rfkill \
         >> "$LOG_FILE" 2>&1
+    # FIX #2 : unmask ET désactivation de wpa_supplicant sur wlan0
     systemctl unmask hostapd >> "$LOG_FILE" 2>&1 || true
-    ok "Paquets installés (hostapd + dnsmasq)"
+    ok "Paquets installés (hostapd + dnsmasq + rfkill)"
+}
+
+unblock_wifi() {
+    # FIX #3 : déblocage rfkill — cause principale du hotspot qui ne démarre pas
+    step "📶 Déblocage WiFi (rfkill)"
+    rfkill unblock wifi >> "$LOG_FILE" 2>&1 || true
+    ok "WiFi débloqué via rfkill"
+}
+
+stop_conflicting_services() {
+    # FIX #4 : wpa_supplicant et NetworkManager entrent en conflit avec hostapd
+    step "🛑 Arrêt des services en conflit"
+
+    # Arrêter wpa_supplicant sur wlan0 (conflit direct avec hostapd)
+    if systemctl is-active wpa_supplicant &>/dev/null; then
+        info "Arrêt de wpa_supplicant..."
+        systemctl stop wpa_supplicant >> "$LOG_FILE" 2>&1 || true
+        systemctl disable wpa_supplicant >> "$LOG_FILE" 2>&1 || true
+    fi
+
+    # Empêcher NetworkManager de gérer wlan0 s'il est présent
+    if systemctl is-active NetworkManager &>/dev/null; then
+        info "NetworkManager détecté — configuration pour ignorer wlan0..."
+        mkdir -p /etc/NetworkManager/conf.d
+        cat > /etc/NetworkManager/conf.d/guardianpi.conf << EOF
+[keyfile]
+unmanaged-devices=interface-name:${AP_IF}
+EOF
+        systemctl reload NetworkManager >> "$LOG_FILE" 2>&1 || true
+    fi
+
+    # Arrêter systemd-networkd si actif (conflit possible)
+    if systemctl is-active systemd-networkd &>/dev/null; then
+        info "Arrêt de systemd-networkd sur ${AP_IF}..."
+        cat > /etc/systemd/network/10-guardianpi-wlan.network << EOF
+[Match]
+Name=${AP_IF}
+
+[Link]
+Unmanaged=yes
+EOF
+        systemctl restart systemd-networkd >> "$LOG_FILE" 2>&1 || true
+    fi
+
+    ok "Conflits réseau résolus"
 }
 
 configure_static_ip() {
-    step "🌐 IP statique sur wlan0 (${AP_IP})"
-    # Supprimer toute conf wlan0 existante
-    sed -i '/^interface wlan0/,/^[^[:space:]]/{ /^interface wlan0/d; /nohook\|static ip/d }' /etc/dhcpcd.conf 2>/dev/null || true
+    step "🌐 IP statique sur ${AP_IF} (${AP_IP})"
+
+    # FIX #5 : nettoyage propre de toute conf wlan0 existante dans dhcpcd.conf
+    if [[ -f /etc/dhcpcd.conf ]]; then
+        # Supprimer le bloc GuardianPi précédent s'il existe
+        sed -i '/# GuardianPi/,/nohook wpa_supplicant/d' /etc/dhcpcd.conf 2>/dev/null || true
+    fi
 
     cat >> /etc/dhcpcd.conf << EOF
 
@@ -99,7 +172,13 @@ interface ${AP_IF}
     static ip_address=${AP_IP}/24
     nohook wpa_supplicant
 EOF
-    ok "IP statique ${AP_IP} → ${AP_IF}"
+
+    # Appliquer immédiatement sans attendre le redémarrage de dhcpcd
+    ip addr flush dev "$AP_IF" 2>/dev/null || true
+    ip addr add "${AP_IP}/24" dev "$AP_IF" 2>/dev/null || true
+    ip link set "$AP_IF" up 2>/dev/null || true
+
+    ok "IP statique ${AP_IP} appliquée sur ${AP_IF}"
 }
 
 configure_hostapd() {
@@ -126,7 +205,16 @@ rsn_pairwise=CCMP
 macaddr_acl=0
 ignore_broadcast_ssid=0
 EOF
+
+    # FIX #6 : pointer explicitement vers le fichier de config dans /etc/default/hostapd
     echo 'DAEMON_CONF="/etc/hostapd/hostapd.conf"' > /etc/default/hostapd
+
+    # FIX #7 : aussi patcher le service systemd hostapd (nécessaire sur Debian/Bookworm)
+    if [[ -f /lib/systemd/system/hostapd.service ]]; then
+        sed -i 's|#DAEMON_CONF=.*|DAEMON_CONF=/etc/hostapd/hostapd.conf|' \
+            /lib/systemd/system/hostapd.service 2>/dev/null || true
+    fi
+
     systemctl enable hostapd >> "$LOG_FILE" 2>&1
     ok "Hotspot '${AP_SSID}' configuré (canal ${AP_CHANNEL}, WPA2)"
 }
@@ -169,7 +257,7 @@ EOF
 
     # Désactiver systemd-resolved (conflit port 53)
     if systemctl is-active systemd-resolved &>/dev/null; then
-        info "Désactivation systemd-resolved..."
+        info "Désactivation systemd-resolved (conflit port 53)..."
         systemctl stop systemd-resolved >> "$LOG_FILE" 2>&1
         systemctl disable systemd-resolved >> "$LOG_FILE" 2>&1
         rm -f /etc/resolv.conf
@@ -244,7 +332,7 @@ setup_python() {
 }
 
 create_config() {
-    step "⚙️ Configuration initiale"
+    step "⚙️  Configuration initiale"
     LOCAL_IP=$(hostname -I | awk '{print $1}')
     cat > "$DATA_DIR/config.json" << EOF
 {
@@ -323,22 +411,48 @@ EOF
 }
 
 start_all() {
-    step "🚀 Démarrage"
-    systemctl restart dhcpcd >> "$LOG_FILE" 2>&1 || warn "dhcpcd non redémarré"
+    step "🚀 Démarrage des services"
+
+    # FIX #8 : ordre correct + vérification avec messages d'erreur clairs
+
+    # 1. Redémarrer dhcpcd pour appliquer l'IP statique
+    if systemctl is-enabled dhcpcd &>/dev/null 2>&1; then
+        systemctl restart dhcpcd >> "$LOG_FILE" 2>&1 && ok "dhcpcd redémarré" || warn "dhcpcd : erreur (voir $LOG_FILE)"
+        sleep 3
+    fi
+
+    # 2. S'assurer que l'IP est bien sur l'interface (double filet de sécurité)
+    if ! ip addr show "$AP_IF" | grep -q "${AP_IP}"; then
+        info "Application manuelle de l'IP ${AP_IP} sur ${AP_IF}..."
+        ip addr add "${AP_IP}/24" dev "$AP_IF" 2>/dev/null || true
+        ip link set "$AP_IF" up
+    fi
+
+    # 3. Lancer hostapd
+    systemctl restart hostapd >> "$LOG_FILE" 2>&1
     sleep 2
-    systemctl start hostapd >> "$LOG_FILE" 2>&1 || warn "hostapd: vérifiez les logs"
+    if systemctl is-active hostapd &>/dev/null; then
+        ok "hostapd actif — Hotspot '${AP_SSID}' diffusé ✓"
+    else
+        warn "hostapd inactif — Diagnostic :"
+        journalctl -u hostapd -n 20 --no-pager | tail -20
+        echo ""
+        warn "Conseil : vérifiez que le WiFi n'est pas bloqué (rfkill list)"
+    fi
+
+    # 4. Lancer dnsmasq
+    systemctl restart dnsmasq >> "$LOG_FILE" 2>&1
     sleep 1
-    systemctl restart dnsmasq >> "$LOG_FILE" 2>&1 || warn "dnsmasq: vérifiez la config"
-    sleep 1
-    systemctl start guardianpi >> "$LOG_FILE" 2>&1 || warn "Backend: vérifiez les logs"
+    systemctl is-active dnsmasq &>/dev/null && ok "dnsmasq actif (DHCP + DNS)" || warn "dnsmasq inactif (voir $LOG_FILE)"
+
+    # 5. Lancer le backend GuardianPi
+    systemctl start guardianpi >> "$LOG_FILE" 2>&1
     sleep 2
-    systemctl is-active hostapd &>/dev/null && ok "Hotspot WiFi '${AP_SSID}' ✓" || warn "hostapd inactif"
-    systemctl is-active guardianpi &>/dev/null && ok "GuardianPi backend ✓" || warn "Backend inactif"
+    systemctl is-active guardianpi &>/dev/null && ok "GuardianPi backend actif" || warn "Backend inactif (voir $LOG_FILE)"
 }
 
 print_success() {
     LOCAL_IP=$(hostname -I | awk '{print $1}')
-    clear
     echo ""
     echo -e "${GREEN}╔════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${GREEN}║      ✅  GuardianPi Hotspot installé avec succès !         ║${NC}"
@@ -361,13 +475,31 @@ print_success() {
     echo ""
     echo -e "${YELLOW}⚠️  Changez le mot de passe WiFi ET le mot de passe admin dans Réglages !${NC}"
     echo ""
+    echo -e "${WHITE}🔎 En cas de problème :${NC}"
+    echo -e "   ${CYAN}sudo bash diagnose.sh${NC}          — diagnostic complet"
+    echo -e "   ${CYAN}journalctl -u hostapd -f${NC}       — logs du point d'accès WiFi"
+    echo -e "   ${CYAN}journalctl -u guardianpi -f${NC}    — logs du backend"
+    echo -e "   ${CYAN}rfkill list${NC}                    — vérifier si le WiFi est bloqué"
+    echo -e "   ${CYAN}cat $LOG_FILE${NC}   — log complet de l'installation"
+    echo ""
 }
 
 main() {
+    # Initialiser le fichier de log
+    mkdir -p "$(dirname "$LOG_FILE")"
+    touch "$LOG_FILE"
     exec > >(tee -a "$LOG_FILE") 2>&1
+    echo "=========================================="
     echo "Début installation GuardianPi Hotspot: $(date)"
-    check_root; check_pi; check_internet; check_wifi
+    echo "=========================================="
+
+    check_root
+    check_pi
+    check_internet
+    check_wifi
     install_packages
+    unblock_wifi
+    stop_conflicting_services
     configure_static_ip
     configure_hostapd
     configure_dnsmasq
