@@ -23,7 +23,7 @@ DATA_DIR="/etc/guardianpi/data"
 LOG_FILE="/var/log/guardianpi-install.log"
 PYTHON_MIN="3.9"
 PI_USER="${SUDO_USER:-pi}"
-REPO_URL="https://github.com/votre-repo/guardianpi"  # À adapter
+REPO_URL="https://github.com/contactwebdevpro-cmyk/GuardianPi/"  # À adapter
 
 # ── Banner ──
 clear
