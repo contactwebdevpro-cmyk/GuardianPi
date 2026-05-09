@@ -277,13 +277,30 @@ configure_firewall() {
 install_app() {
     step "📥 Installation de GuardianPi"
     mkdir -p "$INSTALL_DIR" "$DATA_DIR" /etc/guardianpi /etc/iptables
+
+    # Répertoire du script (le projet est un niveau au-dessus de scripts/)
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    LOCAL_SRC="$(dirname "$SCRIPT_DIR")"
+
     if [[ -d "$INSTALL_DIR/.git" ]]; then
+        # Mise à jour d'une installation existante
         cd "$INSTALL_DIR" && git pull origin main >> "$LOG_FILE" 2>&1
+        ok "Mise à jour git effectuée"
+    elif [[ -f "$LOCAL_SRC/backend/main.py" ]]; then
+        # Copie depuis les fichiers locaux (cas normal : script lancé depuis le projet)
+        info "Copie des fichiers locaux depuis $LOCAL_SRC..."
+        cp -r "$LOCAL_SRC/backend"  "$INSTALL_DIR/"
+        cp -r "$LOCAL_SRC/frontend" "$INSTALL_DIR/"
+        [[ -d "$LOCAL_SRC/scripts" ]] && cp -r "$LOCAL_SRC/scripts" "$INSTALL_DIR/"
+        ok "Fichiers copiés depuis le projet local"
     elif [[ -d /tmp/guardianpi-src ]]; then
         cp -r /tmp/guardianpi-src/* "$INSTALL_DIR/"
+        ok "Fichiers copiés depuis /tmp/guardianpi-src"
     else
+        # Dernier recours : git clone
+        info "Tentative de clonage depuis GitHub..."
         git clone "$REPO_URL" "$INSTALL_DIR" >> "$LOG_FILE" 2>&1 || {
-            warn "Clonage échoué — structure minimale créée"
+            warn "Clonage échoué — structure minimale créée (dashboard indisponible)"
             mkdir -p "$INSTALL_DIR"/{backend,frontend/public,scripts}
         }
     fi
