@@ -250,30 +250,41 @@ def normalize_mac(mac: str) -> str:
     """Normalise une adresse MAC en minuscules avec ':'"""
     return mac.replace("-", ":").lower()
 
-def block_device_mac(mac: str, blocked: bool):
-    """Bloque/débloque un appareil via iptables (par adresse MAC).
-    
-    FIX: - MAC normalisé en minuscules (iptables est case-sensitive avec --mac-source)
-         - Déconnecte l'appareil du WiFi via hostapd si bloqué (sinon il garde sa session)
-         - Bloque aussi INPUT/OUTPUT pour couper totalement (pas seulement FORWARD)
+def _flush_mac_rules(mac_upper: str):
+    """Supprime TOUTES les règles DROP pour une MAC donnée.
+
+    iptables -D ne retire qu'une règle à la fois. Si la même MAC a été
+    insérée plusieurs fois (restore_state + blocage manuel), un seul -D
+    laisse les règles restantes actives → l'appareil reste bloqué.
+    On boucle jusqu'à ce qu'il n'y ait plus rien à supprimer.
     """
+    for _ in range(20):  # 20 = largement suffisant
+        rc1, _, _ = run_cmd(f"iptables -D FORWARD -m mac --mac-source {mac_upper} -j DROP 2>/dev/null")
+        rc2, _, _ = run_cmd(f"iptables -D INPUT  -m mac --mac-source {mac_upper} -j DROP 2>/dev/null")
+        if rc1 != 0 and rc2 != 0:
+            break  # plus aucune règle DROP pour cette MAC
+
+
+def block_device_mac(mac: str, blocked: bool):
+    """Bloque/débloque un appareil via iptables (par adresse MAC)."""
     mac_norm = normalize_mac(mac)
-    mac_upper = mac_norm.upper()  # iptables mac module accepte les deux, on force upper pour cohérence
+    mac_upper = mac_norm.upper()
+
+    # Toujours commencer par purger les règles existantes pour cette MAC
+    # (évite les doublons et garantit un état propre avant d'ajouter)
+    _flush_mac_rules(mac_upper)
 
     if blocked:
-        # Supprimer les règles existantes d'abord (évite les doublons)
-        run_cmd(f"iptables -D FORWARD -m mac --mac-source {mac_upper} -j DROP 2>/dev/null")
         # Insérer en tête de chaîne pour priorité maximale
         run_cmd(f"iptables -I FORWARD 1 -m mac --mac-source {mac_upper} -j DROP")
-        # Bloquer aussi les nouvelles connexions INPUT (ex: requêtes DNS vers le Pi)
-        run_cmd(f"iptables -D INPUT -m mac --mac-source {mac_upper} -j DROP 2>/dev/null")
-        run_cmd(f"iptables -I INPUT 1 -m mac --mac-source {mac_upper} -j DROP")
-        # Déconnecter l'appareil du WiFi immédiatement (sinon il garde sa session TCP)
+        run_cmd(f"iptables -I INPUT  1 -m mac --mac-source {mac_upper} -j DROP")
+        # Déconnecter immédiatement du WiFi (sinon il garde sa session TCP active)
         run_cmd(f"hostapd_cli -i wlan0 deauthenticate {mac_norm} 2>/dev/null || true")
     else:
-        # Supprimer toutes les règles de blocage pour cette MAC
-        run_cmd(f"iptables -D FORWARD -m mac --mac-source {mac_upper} -j DROP 2>/dev/null")
-        run_cmd(f"iptables -D INPUT -m mac --mac-source {mac_upper} -j DROP 2>/dev/null")
+        # _flush_mac_rules a déjà tout supprimé.
+        # Reconnecter : deauth force le téléphone à refaire le handshake WiFi
+        # et à obtenir une nouvelle IP propre (sans cache DNS bloqué).
+        run_cmd(f"hostapd_cli -i wlan0 deauthenticate {mac_norm} 2>/dev/null || true")
 
 def pause_device_mac(mac: str, paused: bool):
     block_device_mac(mac, paused)
