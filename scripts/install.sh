@@ -1,14 +1,8 @@
 #!/bin/bash
 # ══════════════════════════════════════════════════════════════════
 #  GuardianPi — Script d'installation (Mode Point d'Accès WiFi)
-#  Le Raspberry Pi crée son propre réseau WiFi "GuardianPi"
-#  Les appareils s'y connectent → filtrage automatique, sans config !
 #  Usage: sudo bash install.sh
 # ══════════════════════════════════════════════════════════════════
-
-# FIX #1 : "set -euo pipefail" supprimé — il faisait quitter le script
-# à la moindre erreur non fatale (ex: commande introuvable, ping raté)
-# On gère les erreurs manuellement ci-dessous.
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 BLUE='\033[0;34m'; CYAN='\033[0;36m'; WHITE='\033[1;37m'; NC='\033[0m'
@@ -19,14 +13,11 @@ DATA_DIR="/etc/guardianpi/data"
 LOG_FILE="/var/log/guardianpi-install.log"
 REPO_URL="https://github.com/contactwebdevpro-cmyk/GuardianPi.git"
 
-# ─── Interfaces réseau ───────────────────────────────────────────
-WAN_IF="eth0"           # Câble Ethernet → box internet
-AP_IF="wlan0"           # WiFi → les appareils se connectent ici
-AP_IP="192.168.4.1"     # IP du Pi sur son propre réseau WiFi
+WAN_IF="eth0"
+AP_IF="wlan0"
+AP_IP="192.168.4.1"
 DHCP_START="192.168.4.100"
 DHCP_END="192.168.4.200"
-
-# ─── Config WiFi (modifiable après install via le dashboard) ──────
 AP_SSID="GuardianPi"
 AP_PASSPHRASE="guardianpi123"
 AP_CHANNEL="6"
@@ -43,10 +34,7 @@ cat << 'BANNER'
 
 BANNER
 echo -e "${WHITE}  Routeur parental — Mode Point d'Accès WiFi${NC}"
-echo -e "${CYAN}  Version 2.0.0${NC}"
-echo ""
-echo -e "${GREEN}  📶 Le Pi crée son propre WiFi 'GuardianPi'${NC}"
-echo -e "${GREEN}  📱 Les appareils s'y connectent → filtrage transparent !${NC}"
+echo -e "${CYAN}  Version 2.0.1${NC}"
 echo ""
 
 step()  { echo ""; echo -e "${BLUE}━━━ $1 ━━━${NC}"; }
@@ -58,7 +46,6 @@ err()   { echo -e "  ${RED}✗${NC} $1"; }
 check_root() {
     if [[ $EUID -ne 0 ]]; then
         err "Ce script doit être lancé avec sudo"
-        echo -e "${RED}  Relancez : sudo bash install.sh${NC}"
         exit 1
     fi
     ok "Droits root OK"
@@ -66,11 +53,9 @@ check_root() {
 
 check_pi() {
     if grep -q "Raspberry Pi" /proc/cpuinfo 2>/dev/null; then
-        DEVMODE=false
-        ok "Raspberry Pi détecté"
+        DEVMODE=false; ok "Raspberry Pi détecté"
     else
-        DEVMODE=true
-        warn "Mode développement (pas de Pi — certaines étapes seront ignorées)"
+        DEVMODE=true; warn "Mode développement (pas de Pi)"
     fi
 }
 
@@ -80,8 +65,7 @@ check_internet() {
         echo -e "${GREEN}✓${NC}"
     else
         echo -e "${RED}✗${NC}"
-        err "Pas de connexion internet. Vérifiez le câble Ethernet sur eth0."
-        err "Si vous êtes en mode dev/test, ignorez cette erreur et relancez en commentant la ligne 'exit 1' ci-dessous."
+        err "Pas de connexion internet. Vérifiez le câble Ethernet sur ${WAN_IF}."
         exit 1
     fi
 }
@@ -92,7 +76,7 @@ check_wifi() {
         echo -e "${GREEN}✓${NC}"
     else
         echo -e "${RED}✗${NC}"
-        err "wlan0 introuvable. Branchez un adaptateur WiFi ou activez le WiFi intégré."
+        err "wlan0 introuvable."
         exit 1
     fi
 }
@@ -100,49 +84,51 @@ check_wifi() {
 install_packages() {
     step "📦 Installation des paquets"
     apt-get update -qq >> "$LOG_FILE" 2>&1
-    apt-get install -y \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y \
         python3 python3-pip python3-venv \
         hostapd dnsmasq \
         iptables iptables-persistent \
         dhcpcd5 nmap git curl net-tools iproute2 procps rfkill \
         >> "$LOG_FILE" 2>&1
-    # FIX #2 : unmask ET désactivation de wpa_supplicant sur wlan0
     systemctl unmask hostapd >> "$LOG_FILE" 2>&1 || true
-    ok "Paquets installés (hostapd + dnsmasq + rfkill)"
+    ok "Paquets installés"
 }
 
 unblock_wifi() {
-    # FIX #3 : déblocage rfkill — cause principale du hotspot qui ne démarre pas
     step "📶 Déblocage WiFi (rfkill)"
     rfkill unblock wifi >> "$LOG_FILE" 2>&1 || true
-    ok "WiFi débloqué via rfkill"
+    rfkill unblock all  >> "$LOG_FILE" 2>&1 || true
+    ok "WiFi débloqué"
 }
 
 stop_conflicting_services() {
-    # FIX #4 : wpa_supplicant et NetworkManager entrent en conflit avec hostapd
     step "🛑 Arrêt des services en conflit"
 
-    # Arrêter wpa_supplicant sur wlan0 (conflit direct avec hostapd)
+    # wpa_supplicant — conflit direct avec hostapd sur wlan0
     if systemctl is-active wpa_supplicant &>/dev/null; then
         info "Arrêt de wpa_supplicant..."
         systemctl stop wpa_supplicant >> "$LOG_FILE" 2>&1 || true
         systemctl disable wpa_supplicant >> "$LOG_FILE" 2>&1 || true
     fi
+    pkill -f "wpa_supplicant.*wlan0" 2>/dev/null || true
+    sleep 1
 
-    # Empêcher NetworkManager de gérer wlan0 s'il est présent
+    # NetworkManager — ignorer wlan0
     if systemctl is-active NetworkManager &>/dev/null; then
-        info "NetworkManager détecté — configuration pour ignorer wlan0..."
+        info "NetworkManager détecté — exclusion de ${AP_IF}..."
         mkdir -p /etc/NetworkManager/conf.d
         cat > /etc/NetworkManager/conf.d/guardianpi.conf << EOF
 [keyfile]
 unmanaged-devices=interface-name:${AP_IF}
 EOF
         systemctl reload NetworkManager >> "$LOG_FILE" 2>&1 || true
+        sleep 1
     fi
 
-    # Arrêter systemd-networkd si actif (conflit possible)
+    # systemd-networkd — marquer wlan0 non géré
     if systemctl is-active systemd-networkd &>/dev/null; then
-        info "Arrêt de systemd-networkd sur ${AP_IF}..."
+        info "systemd-networkd — exclusion de ${AP_IF}..."
+        mkdir -p /etc/systemd/network
         cat > /etc/systemd/network/10-guardianpi-wlan.network << EOF
 [Match]
 Name=${AP_IF}
@@ -156,12 +142,16 @@ EOF
     ok "Conflits réseau résolus"
 }
 
+apply_static_ip() {
+    ip addr flush dev "$AP_IF" 2>/dev/null || true
+    ip addr add "${AP_IP}/24" dev "$AP_IF" 2>/dev/null || true
+    ip link set "$AP_IF" up 2>/dev/null || true
+}
+
 configure_static_ip() {
     step "🌐 IP statique sur ${AP_IF} (${AP_IP})"
 
-    # FIX #5 : nettoyage propre de toute conf wlan0 existante dans dhcpcd.conf
     if [[ -f /etc/dhcpcd.conf ]]; then
-        # Supprimer le bloc GuardianPi précédent s'il existe
         sed -i '/# GuardianPi/,/nohook wpa_supplicant/d' /etc/dhcpcd.conf 2>/dev/null || true
     fi
 
@@ -173,11 +163,7 @@ interface ${AP_IF}
     nohook wpa_supplicant
 EOF
 
-    # Appliquer immédiatement sans attendre le redémarrage de dhcpcd
-    ip addr flush dev "$AP_IF" 2>/dev/null || true
-    ip addr add "${AP_IP}/24" dev "$AP_IF" 2>/dev/null || true
-    ip link set "$AP_IF" up 2>/dev/null || true
-
+    apply_static_ip
     ok "IP statique ${AP_IP} appliquée sur ${AP_IF}"
 }
 
@@ -185,7 +171,6 @@ configure_hostapd() {
     step "📶 Point d'accès WiFi (hostapd)"
     mkdir -p /etc/hostapd
     cat > /etc/hostapd/hostapd.conf << EOF
-# GuardianPi Hotspot
 interface=${AP_IF}
 driver=nl80211
 ssid=${AP_SSID}
@@ -194,8 +179,6 @@ channel=${AP_CHANNEL}
 country_code=${AP_COUNTRY}
 ieee80211n=1
 wmm_enabled=1
-
-# Sécurité WPA2
 auth_algs=1
 wpa=2
 wpa_passphrase=${AP_PASSPHRASE}
@@ -206,17 +189,10 @@ macaddr_acl=0
 ignore_broadcast_ssid=0
 EOF
 
-    # FIX #6 : pointer explicitement vers le fichier de config dans /etc/default/hostapd
     echo 'DAEMON_CONF="/etc/hostapd/hostapd.conf"' > /etc/default/hostapd
-
-    # FIX #7 : aussi patcher le service systemd hostapd (nécessaire sur Debian/Bookworm)
-    if [[ -f /lib/systemd/system/hostapd.service ]]; then
-        sed -i 's|#DAEMON_CONF=.*|DAEMON_CONF=/etc/hostapd/hostapd.conf|' \
-            /lib/systemd/system/hostapd.service 2>/dev/null || true
-    fi
-
+    systemctl daemon-reload >> "$LOG_FILE" 2>&1
     systemctl enable hostapd >> "$LOG_FILE" 2>&1
-    ok "Hotspot '${AP_SSID}' configuré (canal ${AP_CHANNEL}, WPA2)"
+    ok "Hotspot '${AP_SSID}' configuré"
 }
 
 configure_dnsmasq() {
@@ -224,38 +200,25 @@ configure_dnsmasq() {
     [[ -f /etc/dnsmasq.conf ]] && cp /etc/dnsmasq.conf /etc/dnsmasq.conf.backup
 
     cat > /etc/dnsmasq.conf << EOF
-# GuardianPi — DHCP + DNS pour le réseau WiFi interne
 interface=${AP_IF}
 bind-interfaces
 listen-address=${AP_IP}
 no-resolv
-
-# DNS upstream (Cloudflare + Google)
 server=1.1.1.1
 server=8.8.8.8
 server=9.9.9.9
 cache-size=1000
 neg-ttl=60
-
-# DHCP : attribue une IP à chaque appareil qui se connecte au WiFi
 dhcp-range=${DHCP_START},${DHCP_END},255.255.255.0,12h
-
-# Envoie automatiquement au téléphone/tablette :
-#   Gateway → Pi (le trafic passe par lui)
-#   DNS     → Pi (filtrage transparent)
 dhcp-option=option:router,${AP_IP}
 dhcp-option=option:dns-server,${AP_IP}
-
 dhcp-leasefile=/var/lib/misc/dnsmasq.leases
-
-# Blocage DNS GuardianPi
 conf-file=/etc/guardianpi/blocked_domains.conf
 EOF
 
-    mkdir -p /etc/guardianpi
+    mkdir -p /etc/guardianpi /var/lib/misc
     touch /etc/guardianpi/blocked_domains.conf
 
-    # Désactiver systemd-resolved (conflit port 53)
     if systemctl is-active systemd-resolved &>/dev/null; then
         info "Désactivation systemd-resolved (conflit port 53)..."
         systemctl stop systemd-resolved >> "$LOG_FILE" 2>&1
@@ -269,7 +232,7 @@ EOF
 }
 
 configure_nat() {
-    step "🔀 Routage NAT : WiFi (${AP_IF}) → Internet (${WAN_IF})"
+    step "🔀 Routage NAT"
     sysctl -w net.ipv4.ip_forward=1 >> "$LOG_FILE" 2>&1
     echo "net.ipv4.ip_forward=1" > /etc/sysctl.d/99-guardianpi.conf
     sysctl -p /etc/sysctl.d/99-guardianpi.conf >> "$LOG_FILE" 2>&1
@@ -277,15 +240,12 @@ configure_nat() {
     if [[ "$DEVMODE" == "false" ]]; then
         iptables -t nat -F
         iptables -F FORWARD
-        # Masquerade : les appareils WiFi sortent avec l'IP eth0 du Pi
         iptables -t nat -A POSTROUTING -o "${WAN_IF}" -j MASQUERADE
-        # Forwarding WiFi → Internet
         iptables -A FORWARD -i "${AP_IF}" -o "${WAN_IF}" -j ACCEPT
-        # Réponses autorisées
         iptables -A FORWARD -i "${WAN_IF}" -o "${AP_IF}" -m state --state ESTABLISHED,RELATED -j ACCEPT
         mkdir -p /etc/iptables
         iptables-save > /etc/iptables/rules.v4
-        ok "NAT actif — les appareils WiFi ont accès à internet via eth0"
+        ok "NAT actif"
     else
         warn "Mode dev — NAT ignoré"
     fi
@@ -350,7 +310,7 @@ create_config() {
   "dhcp_start": "${DHCP_START}",
   "dhcp_end": "${DHCP_END}",
   "global_pause": false,
-  "version": "2.0.0",
+  "version": "2.0.1",
   "install_date": "$(date -Iseconds)"
 }
 EOF
@@ -360,14 +320,15 @@ EOF
     echo "{}" > "$DATA_DIR/tokens.json"
     chown -R root:root /etc/guardianpi
     chmod -R 700 /etc/guardianpi
-    ok "Configuration créée (mode hotspot)"
+    ok "Configuration créée"
 }
 
 create_services() {
     step "🔧 Services systemd"
+
     cat > /etc/systemd/system/guardianpi.service << EOF
 [Unit]
-Description=GuardianPi — Routeur Parental (Mode Hotspot)
+Description=GuardianPi — Routeur Parental
 After=network.target hostapd.service dnsmasq.service
 Wants=hostapd.service dnsmasq.service
 
@@ -383,8 +344,6 @@ StandardError=journal
 SyslogIdentifier=guardianpi
 Environment=PYTHONUNBUFFERED=1
 Environment=GUARDIANPI_ENV=production
-MemoryLimit=256M
-CPUQuota=80%
 
 [Install]
 WantedBy=multi-user.target
@@ -405,92 +364,120 @@ RemainAfterExit=yes
 WantedBy=multi-user.target
 EOF
 
+    # SERVICE CLÉ : garantit que wlan0 a son IP AVANT dnsmasq et hostapd
+    cat > /etc/systemd/system/guardianpi-ip.service << EOF
+[Unit]
+Description=GuardianPi — IP statique wlan0
+Before=dnsmasq.service hostapd.service guardianpi.service
+After=network-pre.target
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/bash -c '\
+    rfkill unblock wifi 2>/dev/null || true; \
+    pkill -f "wpa_supplicant.*wlan0" 2>/dev/null || true; \
+    sleep 1; \
+    ip addr flush dev ${AP_IF} 2>/dev/null || true; \
+    ip addr add ${AP_IP}/24 dev ${AP_IF}; \
+    ip link set ${AP_IF} up'
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
     systemctl daemon-reload >> "$LOG_FILE" 2>&1
-    systemctl enable guardianpi-restore guardianpi >> "$LOG_FILE" 2>&1
-    ok "Services configurés"
+    systemctl enable guardianpi-restore guardianpi guardianpi-ip >> "$LOG_FILE" 2>&1
+    ok "Services configurés (guardianpi-ip démarre avant dnsmasq)"
 }
 
 start_all() {
     step "🚀 Démarrage des services"
 
-    # FIX #8 : ordre correct + vérification avec messages d'erreur clairs
+    # 1. Appliquer l'IP maintenant
+    info "Application de l'IP ${AP_IP} sur ${AP_IF}..."
+    apply_static_ip
+    sleep 1
 
-    # 1. Redémarrer dhcpcd pour appliquer l'IP statique
+    # 2. dhcpcd
     if systemctl is-enabled dhcpcd &>/dev/null 2>&1; then
-        systemctl restart dhcpcd >> "$LOG_FILE" 2>&1 && ok "dhcpcd redémarré" || warn "dhcpcd : erreur (voir $LOG_FILE)"
-        sleep 3
+        systemctl restart dhcpcd >> "$LOG_FILE" 2>&1 && ok "dhcpcd redémarré" || warn "dhcpcd erreur"
+        sleep 2
     fi
 
-    # 2. S'assurer que l'IP est bien sur l'interface (double filet de sécurité)
+    # 3. Re-vérifier l'IP (dhcpcd peut l'effacer)
     if ! ip addr show "$AP_IF" | grep -q "${AP_IP}"; then
-        info "Application manuelle de l'IP ${AP_IP} sur ${AP_IF}..."
-        ip addr add "${AP_IP}/24" dev "$AP_IF" 2>/dev/null || true
-        ip link set "$AP_IF" up
+        info "Ré-application de l'IP (effacée par dhcpcd)..."
+        apply_static_ip
+        sleep 1
     fi
 
-    # 3. Lancer hostapd
+    if ip addr show "$AP_IF" | grep -q "${AP_IP}"; then
+        ok "IP ${AP_IP} confirmée sur ${AP_IF}"
+    else
+        warn "IP ${AP_IP} absente — les services risquent d'échouer"
+    fi
+
+    # 4. hostapd
     systemctl restart hostapd >> "$LOG_FILE" 2>&1
     sleep 2
     if systemctl is-active hostapd &>/dev/null; then
         ok "hostapd actif — Hotspot '${AP_SSID}' diffusé ✓"
     else
-        warn "hostapd inactif — Diagnostic :"
-        journalctl -u hostapd -n 20 --no-pager | tail -20
-        echo ""
-        warn "Conseil : vérifiez que le WiFi n'est pas bloqué (rfkill list)"
+        warn "hostapd inactif :"
+        journalctl -u hostapd -n 10 --no-pager 2>/dev/null | tail -10
     fi
 
-    # 4. Lancer dnsmasq
+    # 5. dnsmasq — après confirmation IP
     systemctl restart dnsmasq >> "$LOG_FILE" 2>&1
     sleep 1
-    systemctl is-active dnsmasq &>/dev/null && ok "dnsmasq actif (DHCP + DNS)" || warn "dnsmasq inactif (voir $LOG_FILE)"
+    if systemctl is-active dnsmasq &>/dev/null; then
+        ok "dnsmasq actif (DHCP + DNS) ✓"
+    else
+        warn "dnsmasq inactif :"
+        journalctl -u dnsmasq -n 10 --no-pager 2>/dev/null | tail -10
+    fi
 
-    # 5. Lancer le backend GuardianPi
+    # 6. Backend
     systemctl start guardianpi >> "$LOG_FILE" 2>&1
     sleep 2
-    systemctl is-active guardianpi &>/dev/null && ok "GuardianPi backend actif" || warn "Backend inactif (voir $LOG_FILE)"
+    systemctl is-active guardianpi &>/dev/null && ok "GuardianPi backend actif" || warn "Backend inactif"
 }
 
 print_success() {
     LOCAL_IP=$(hostname -I | awk '{print $1}')
     echo ""
     echo -e "${GREEN}╔════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}║      ✅  GuardianPi Hotspot installé avec succès !         ║${NC}"
+    echo -e "${GREEN}║      ✅  GuardianPi installé avec succès !                 ║${NC}"
     echo -e "${GREEN}╚════════════════════════════════════════════════════════════╝${NC}"
     echo ""
-    echo -e "${WHITE}📶 Réseau WiFi créé :${NC}"
-    echo -e "   SSID          : ${CYAN}${AP_SSID}${NC}"
-    echo -e "   Mot de passe  : ${CYAN}${AP_PASSPHRASE}${NC}"
-    echo ""
-    echo -e "${WHITE}📱 Pour connecter un téléphone :${NC}"
-    echo -e "   1. Réglages → WiFi → choisir ${CYAN}${AP_SSID}${NC}"
-    echo -e "   2. Mot de passe : ${CYAN}${AP_PASSPHRASE}${NC}"
-    echo -e "   3. Connecté ! Le filtrage est automatique. ✓"
+    echo -e "${WHITE}📶 Réseau WiFi :${NC}"
+    echo -e "   SSID         : ${CYAN}${AP_SSID}${NC}"
+    echo -e "   Mot de passe : ${CYAN}${AP_PASSPHRASE}${NC}"
     echo ""
     echo -e "${WHITE}📍 Dashboard :${NC}"
-    echo -e "   ${CYAN}http://${AP_IP}:8080${NC}  (depuis un appareil sur le WiFi GuardianPi)"
-    echo -e "   ${CYAN}http://${LOCAL_IP}:8080${NC}  (depuis le réseau de la box)"
+    echo -e "   ${CYAN}http://${AP_IP}:8080${NC}      (WiFi GuardianPi)"
+    echo -e "   ${CYAN}http://${LOCAL_IP}:8080${NC}  (réseau Ethernet)"
     echo ""
     echo -e "${WHITE}🔐 Identifiants : ${CYAN}admin${NC} / ${CYAN}guardianpi${NC}"
     echo ""
-    echo -e "${YELLOW}⚠️  Changez le mot de passe WiFi ET le mot de passe admin dans Réglages !${NC}"
+    echo -e "${YELLOW}⚠️  Changez les mots de passe dans Réglages !${NC}"
     echo ""
-    echo -e "${WHITE}🔎 En cas de problème :${NC}"
-    echo -e "   ${CYAN}sudo bash diagnose.sh${NC}          — diagnostic complet"
-    echo -e "   ${CYAN}journalctl -u hostapd -f${NC}       — logs du point d'accès WiFi"
-    echo -e "   ${CYAN}journalctl -u guardianpi -f${NC}    — logs du backend"
-    echo -e "   ${CYAN}rfkill list${NC}                    — vérifier si le WiFi est bloqué"
-    echo -e "   ${CYAN}cat $LOG_FILE${NC}   — log complet de l'installation"
+    echo -e "${WHITE}🔎 Diagnostic :${NC}"
+    echo -e "   ${CYAN}sudo bash diagnose.sh${NC}"
+    echo -e "   ${CYAN}journalctl -u hostapd -f${NC}    — logs WiFi"
+    echo -e "   ${CYAN}journalctl -u dnsmasq -f${NC}    — logs DHCP/DNS"
+    echo -e "   ${CYAN}journalctl -u guardianpi -f${NC} — logs backend"
     echo ""
 }
 
 main() {
-    # Initialiser le fichier de log
     mkdir -p "$(dirname "$LOG_FILE")"
     touch "$LOG_FILE"
     exec > >(tee -a "$LOG_FILE") 2>&1
     echo "=========================================="
-    echo "Début installation GuardianPi Hotspot: $(date)"
+    echo "Début installation GuardianPi: $(date)"
     echo "=========================================="
 
     check_root
