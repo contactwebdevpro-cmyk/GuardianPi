@@ -208,7 +208,9 @@ server=1.1.1.1
 server=8.8.8.8
 server=9.9.9.9
 cache-size=1000
-neg-ttl=60
+local-ttl=0
+neg-ttl=0
+no-negcache
 dhcp-range=${DHCP_START},${DHCP_END},255.255.255.0,12h
 dhcp-option=option:router,${AP_IP}
 dhcp-option=option:dns-server,${AP_IP}
@@ -385,6 +387,17 @@ ExecStart=/bin/bash -c '\
 
 [Install]
 WantedBy=multi-user.target
+EOF
+
+    # Override dnsmasq : attend que l'IP 192.168.4.1 soit sur wlan0 avant de démarrer
+    mkdir -p /etc/systemd/system/dnsmasq.service.d
+    cat > /etc/systemd/system/dnsmasq.service.d/guardianpi-wait.conf << EOF
+[Unit]
+After=guardianpi-ip.service network-pre.target
+Requires=guardianpi-ip.service
+
+[Service]
+ExecStartPre=/bin/bash -c 'for i in \$(seq 1 20); do ip addr show ${AP_IF} | grep -q ${AP_IP} && exit 0; sleep 1; done; ip addr add ${AP_IP}/24 dev ${AP_IF}; ip link set ${AP_IF} up'
 EOF
 
     systemctl daemon-reload >> "$LOG_FILE" 2>&1
