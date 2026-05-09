@@ -152,19 +152,25 @@ configure_static_ip() {
     step "🌐 IP statique sur ${AP_IF} (${AP_IP})"
 
     if [[ -f /etc/dhcpcd.conf ]]; then
+        # Supprimer les anciens blocs GuardianPi
         sed -i '/# GuardianPi/,/nohook wpa_supplicant/d' /etc/dhcpcd.conf 2>/dev/null || true
+        # Supprimer toute ligne denyinterfaces existante pour AP_IF
+        sed -i "/^denyinterfaces.*${AP_IF}/d" /etc/dhcpcd.conf 2>/dev/null || true
     fi
 
-    cat >> /etc/dhcpcd.conf << EOF
-
-# GuardianPi — interface AP WiFi
-interface ${AP_IF}
-    static ip_address=${AP_IP}/24
-    nohook wpa_supplicant
-EOF
+    # CORRECTION CLÉ : interdire à dhcpcd de toucher wlan0.
+    # Sans cette ligne, dhcpcd démarre après guardianpi-ip.service et écrase
+    # l'IP statique en tentant un bail DHCP infini sur wlan0 → boucle
+    # "récupération de l'IP" côté clients. L'IP sera gérée exclusivement
+    # par guardianpi-ip.service.
+    if [[ -f /etc/dhcpcd.conf ]]; then
+        sed -i "1s/^/denyinterfaces ${AP_IF}\n/" /etc/dhcpcd.conf
+    else
+        echo "denyinterfaces ${AP_IF}" > /etc/dhcpcd.conf
+    fi
 
     apply_static_ip
-    ok "IP statique ${AP_IP} appliquée sur ${AP_IF}"
+    ok "IP statique ${AP_IP} appliquée sur ${AP_IF} (dhcpcd exclu de ${AP_IF})"
 }
 
 configure_hostapd() {
@@ -366,13 +372,16 @@ RemainAfterExit=yes
 WantedBy=multi-user.target
 EOF
 
-    # SERVICE CLÉ : garantit que wlan0 a son IP AVANT dnsmasq et hostapd
+    # SERVICE CLÉ : garantit que wlan0 a son IP AVANT dnsmasq et hostapd.
+    # CORRECTION : After=network.target dhcpcd.service (et non network-pre.target).
+    # dhcpcd est maintenant configuré avec "denyinterfaces wlan0" donc il ne
+    # touche pas wlan0 ; ce service s'exécute après dhcpcd pour appliquer
+    # l'IP statique en dernier, sans risque d'écrasement.
     cat > /etc/systemd/system/guardianpi-ip.service << EOF
 [Unit]
 Description=GuardianPi — IP statique wlan0
 Before=dnsmasq.service hostapd.service guardianpi.service
-After=network-pre.target
-DefaultDependencies=no
+After=network.target dhcpcd.service
 
 [Service]
 Type=oneshot
@@ -380,7 +389,6 @@ RemainAfterExit=yes
 ExecStart=/bin/bash -c '\
     rfkill unblock wifi 2>/dev/null || true; \
     pkill -f "wpa_supplicant.*wlan0" 2>/dev/null || true; \
-    sleep 1; \
     ip addr flush dev ${AP_IF} 2>/dev/null || true; \
     ip addr add ${AP_IP}/24 dev ${AP_IF}; \
     ip link set ${AP_IF} up'
