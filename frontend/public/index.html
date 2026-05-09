@@ -1,0 +1,1746 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>GuardianPi — Contrôle Parental</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* ─── VARIABLES ─── */
+:root {
+  --bg: #0a0d14;
+  --surface: #12161f;
+  --surface2: #1a1f2e;
+  --surface3: #222840;
+  --border: rgba(255,255,255,0.07);
+  --border2: rgba(255,255,255,0.12);
+  --text: #e8eaf2;
+  --text2: #8891b0;
+  --text3: #545d7a;
+  --green: #22c55e;
+  --green-dim: rgba(34,197,94,0.15);
+  --red: #ef4444;
+  --red-dim: rgba(239,68,68,0.15);
+  --orange: #f97316;
+  --orange-dim: rgba(249,115,22,0.15);
+  --blue: #3b82f6;
+  --blue-dim: rgba(59,130,246,0.15);
+  --purple: #a855f7;
+  --purple-dim: rgba(168,85,247,0.12);
+  --accent: #6366f1;
+  --accent2: #818cf8;
+  --radius: 14px;
+  --radius-sm: 8px;
+  --transition: 0.18s cubic-bezier(0.4,0,0.2,1);
+}
+
+/* ─── RESET ─── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 16px; scroll-behavior: smooth; }
+body {
+  font-family: 'DM Sans', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ─── GRID BG ─── */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(99,102,241,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(99,102,241,0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ─── LOGIN SCREEN ─── */
+#login-screen {
+  position: fixed; inset: 0; z-index: 1000;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg);
+  padding: 24px;
+}
+.login-card {
+  background: var(--surface);
+  border: 1px solid var(--border2);
+  border-radius: 24px;
+  padding: 48px 40px;
+  width: 100%; max-width: 380px;
+  box-shadow: 0 32px 80px rgba(0,0,0,0.6);
+}
+.login-logo {
+  text-align: center;
+  margin-bottom: 32px;
+}
+.login-logo .logo-icon {
+  width: 64px; height: 64px;
+  background: linear-gradient(135deg, var(--accent), var(--purple));
+  border-radius: 18px;
+  display: inline-flex;
+  align-items: center; justify-content: center;
+  font-size: 28px;
+  margin-bottom: 16px;
+  box-shadow: 0 8px 32px rgba(99,102,241,0.4);
+}
+.login-logo h1 {
+  font-size: 22px; font-weight: 700; color: var(--text);
+  letter-spacing: -0.3px;
+}
+.login-logo p { font-size: 13px; color: var(--text2); margin-top: 4px; }
+.login-field { margin-bottom: 16px; }
+.login-field label {
+  display: block; font-size: 12px; font-weight: 600;
+  color: var(--text2); letter-spacing: 0.5px;
+  text-transform: uppercase; margin-bottom: 8px;
+}
+.login-field input {
+  width: 100%;
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+  color: var(--text);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 15px;
+  outline: none;
+  transition: border-color var(--transition);
+}
+.login-field input:focus { border-color: var(--accent); }
+.login-error {
+  color: var(--red); font-size: 13px;
+  text-align: center; margin-bottom: 12px;
+  display: none;
+}
+.btn-primary {
+  width: 100%;
+  background: linear-gradient(135deg, var(--accent), var(--purple));
+  border: none; border-radius: var(--radius-sm);
+  padding: 14px;
+  color: white; font-family: 'DM Sans', sans-serif;
+  font-size: 15px; font-weight: 600;
+  cursor: pointer;
+  transition: opacity var(--transition), transform var(--transition);
+  letter-spacing: 0.2px;
+}
+.btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
+.btn-primary:active { transform: translateY(0); }
+
+/* ─── APP LAYOUT ─── */
+#app { position: relative; z-index: 1; display: none; }
+.topbar {
+  position: sticky; top: 0; z-index: 100;
+  background: rgba(10,13,20,0.85);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--border);
+  padding: 0 20px;
+  height: 60px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.topbar-logo {
+  display: flex; align-items: center; gap: 10px;
+}
+.topbar-logo .mini-icon {
+  width: 32px; height: 32px;
+  background: linear-gradient(135deg, var(--accent), var(--purple));
+  border-radius: 9px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px;
+}
+.topbar-logo span {
+  font-size: 16px; font-weight: 700;
+  background: linear-gradient(135deg, var(--accent2), var(--purple));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+}
+.topbar-actions { display: flex; align-items: center; gap: 12px; }
+.status-pill {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 5px 12px;
+  font-size: 12px; font-weight: 500;
+}
+.status-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 6px var(--green);
+}
+.icon-btn {
+  width: 36px; height: 36px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  font-size: 16px;
+  transition: background var(--transition);
+  color: var(--text2);
+}
+.icon-btn:hover { background: var(--surface3); color: var(--text); }
+
+/* ─── MAIN CONTENT ─── */
+.main {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 20px 16px 80px;
+}
+
+/* ─── GLOBAL PAUSE BANNER ─── */
+.pause-banner {
+  background: linear-gradient(135deg, rgba(239,68,68,0.2), rgba(239,68,68,0.05));
+  border: 1px solid rgba(239,68,68,0.3);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 20px;
+  display: none;
+}
+.pause-banner.active { display: flex; }
+.pause-banner-text { display: flex; align-items: center; gap: 10px; }
+.pause-banner-text span { font-size: 14px; font-weight: 500; }
+
+/* ─── STATS ROW ─── */
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 24px;
+}
+@media (max-width: 600px) {
+  .stats-row { grid-template-columns: repeat(2, 1fr); }
+}
+.stat-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  transition: border-color var(--transition);
+}
+.stat-card:hover { border-color: var(--border2); }
+.stat-label {
+  font-size: 11px; font-weight: 600;
+  color: var(--text3); text-transform: uppercase;
+  letter-spacing: 0.5px; margin-bottom: 8px;
+}
+.stat-value {
+  font-size: 26px; font-weight: 700; color: var(--text);
+  line-height: 1;
+}
+.stat-sub { font-size: 12px; color: var(--text2); margin-top: 4px; }
+
+/* ─── SECTION ─── */
+.section { margin-bottom: 28px; }
+.section-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 14px;
+}
+.section-title {
+  font-size: 14px; font-weight: 600; color: var(--text2);
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.section-action {
+  font-size: 13px; color: var(--accent2);
+  cursor: pointer; font-weight: 500;
+  border: none; background: none;
+  padding: 0;
+}
+
+/* ─── QUICK ACTIONS ─── */
+.quick-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 24px;
+}
+.quick-btn {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  cursor: pointer;
+  display: flex; align-items: center; gap: 12px;
+  transition: all var(--transition);
+  color: var(--text);
+  text-align: left;
+}
+.quick-btn:hover {
+  border-color: var(--border2);
+  background: var(--surface2);
+  transform: translateY(-1px);
+}
+.quick-btn.danger:hover { border-color: rgba(239,68,68,0.4); }
+.quick-btn.success:hover { border-color: rgba(34,197,94,0.4); }
+.quick-btn .qb-icon {
+  width: 40px; height: 40px;
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; flex-shrink: 0;
+}
+.quick-btn.danger .qb-icon { background: var(--red-dim); }
+.quick-btn.success .qb-icon { background: var(--green-dim); }
+.quick-btn.orange .qb-icon { background: var(--orange-dim); }
+.quick-btn.blue .qb-icon { background: var(--blue-dim); }
+.quick-btn .qb-text strong { display: block; font-size: 14px; font-weight: 600; }
+.quick-btn .qb-text span { font-size: 12px; color: var(--text2); }
+
+/* ─── DEVICE CARDS ─── */
+.devices-list { display: flex; flex-direction: column; gap: 10px; }
+.device-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  display: flex; align-items: center; gap: 14px;
+  transition: all var(--transition);
+  cursor: default;
+}
+.device-card:hover { border-color: var(--border2); }
+.device-card.blocked { opacity: 0.6; }
+.device-card.offline { opacity: 0.5; }
+
+.device-avatar {
+  width: 44px; height: 44px;
+  border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px;
+  flex-shrink: 0;
+  position: relative;
+}
+.device-avatar.online { background: var(--green-dim); }
+.device-avatar.offline { background: var(--surface2); }
+.device-avatar.blocked { background: var(--red-dim); }
+.online-dot {
+  position: absolute;
+  bottom: 2px; right: 2px;
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  background: var(--green);
+  border: 2px solid var(--surface);
+  box-shadow: 0 0 6px var(--green);
+}
+.offline-dot {
+  position: absolute;
+  bottom: 2px; right: 2px;
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  background: var(--text3);
+  border: 2px solid var(--surface);
+}
+
+.device-info { flex: 1; min-width: 0; }
+.device-name {
+  font-size: 15px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.device-meta {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 3px;
+}
+.device-ip {
+  font-family: 'DM Mono', monospace;
+  font-size: 11px; color: var(--text3);
+}
+.device-badge {
+  font-size: 10px; font-weight: 600;
+  padding: 2px 7px; border-radius: 4px;
+  text-transform: uppercase; letter-spacing: 0.3px;
+}
+.badge-child { background: var(--blue-dim); color: #60a5fa; }
+.badge-teen { background: var(--orange-dim); color: #fb923c; }
+.badge-adult { background: var(--purple-dim); color: #c084fc; }
+.badge-blocked { background: var(--red-dim); color: #f87171; }
+.badge-paused { background: var(--orange-dim); color: #fb923c; }
+.badge-schedule { background: rgba(34,197,94,0.1); color: #4ade80; }
+
+.device-actions {
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+}
+
+/* ─── TOGGLE ─── */
+.toggle {
+  width: 44px; height: 24px;
+  background: var(--surface3);
+  border-radius: 12px;
+  border: none; cursor: pointer;
+  position: relative;
+  transition: background var(--transition);
+  flex-shrink: 0;
+}
+.toggle::after {
+  content: '';
+  position: absolute;
+  top: 3px; left: 3px;
+  width: 18px; height: 18px;
+  background: white;
+  border-radius: 50%;
+  transition: transform var(--transition), box-shadow var(--transition);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+}
+.toggle.on { background: var(--green); }
+.toggle.on::after { transform: translateX(20px); box-shadow: 0 1px 4px rgba(0,0,0,0.3), 0 0 8px rgba(34,197,94,0.4); }
+.toggle.blocked-state { background: var(--red); }
+
+.action-icon-btn {
+  width: 32px; height: 32px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; font-size: 14px;
+  transition: all var(--transition);
+  color: var(--text2);
+}
+.action-icon-btn:hover { background: var(--surface3); color: var(--text); border-color: var(--border2); }
+
+/* ─── BOTTOM NAV ─── */
+.bottom-nav {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 100;
+  background: rgba(10,13,20,0.9);
+  backdrop-filter: blur(20px);
+  border-top: 1px solid var(--border);
+  display: flex; justify-content: space-around;
+  padding: 8px 0 calc(8px + env(safe-area-inset-bottom));
+}
+.nav-item {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 4px; padding: 8px 16px;
+  cursor: pointer; border: none; background: none;
+  color: var(--text3);
+  transition: color var(--transition);
+  min-width: 64px;
+}
+.nav-item.active { color: var(--accent2); }
+.nav-icon { font-size: 20px; }
+.nav-label { font-size: 10px; font-weight: 600; letter-spacing: 0.3px; }
+.nav-item.active .nav-icon {
+  filter: drop-shadow(0 0 8px var(--accent));
+}
+
+/* ─── VIEWS ─── */
+.view { display: none; }
+.view.active { display: block; }
+
+/* ─── RULES VIEW ─── */
+.rules-section { margin-bottom: 24px; }
+.rule-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 8px;
+}
+.rule-icon {
+  width: 36px; height: 36px;
+  border-radius: 9px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; flex-shrink: 0;
+}
+.rule-info { flex: 1; }
+.rule-name { font-size: 14px; font-weight: 600; }
+.rule-sub { font-size: 12px; color: var(--text2); margin-top: 2px; }
+
+/* ─── SCHEDULE VIEW ─── */
+.schedule-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 10px;
+}
+.schedule-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 10px;
+}
+.schedule-title { font-size: 15px; font-weight: 600; }
+.schedule-device { font-size: 12px; color: var(--text2); margin-top: 2px; }
+.schedule-time {
+  font-family: 'DM Mono', monospace;
+  font-size: 22px; font-weight: 500;
+  color: var(--accent2);
+}
+.schedule-days { display: flex; gap: 6px; margin-top: 10px; }
+.day-chip {
+  width: 30px; height: 30px;
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+.day-chip.active { background: var(--accent); color: white; }
+.day-chip.inactive { background: var(--surface2); color: var(--text3); }
+
+/* ─── MODAL ─── */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 500;
+  background: rgba(0,0,0,0.7);
+  backdrop-filter: blur(8px);
+  display: flex; align-items: flex-end;
+  padding: 20px;
+  display: none;
+}
+.modal-overlay.open { display: flex; }
+.modal {
+  background: var(--surface);
+  border: 1px solid var(--border2);
+  border-radius: 24px 24px 16px 16px;
+  width: 100%; max-width: 500px;
+  margin: 0 auto;
+  padding: 28px 24px;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+.modal-title {
+  font-size: 18px; font-weight: 700;
+  margin-bottom: 20px;
+}
+.form-row { margin-bottom: 16px; }
+.form-label {
+  display: block; font-size: 12px; font-weight: 600;
+  color: var(--text2); text-transform: uppercase;
+  letter-spacing: 0.5px; margin-bottom: 8px;
+}
+.form-input, .form-select {
+  width: 100%;
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-sm);
+  padding: 11px 14px;
+  color: var(--text);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 14px; outline: none;
+  transition: border-color var(--transition);
+  -webkit-appearance: none;
+}
+.form-input:focus, .form-select:focus { border-color: var(--accent); }
+.form-select option { background: var(--surface2); }
+.days-selector { display: flex; gap: 8px; flex-wrap: wrap; }
+.day-toggle {
+  width: 38px; height: 38px;
+  border-radius: 10px;
+  border: 1px solid var(--border2);
+  background: var(--surface2);
+  color: var(--text2);
+  font-size: 11px; font-weight: 700;
+  cursor: pointer; transition: all var(--transition);
+}
+.day-toggle.selected {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+.modal-actions { display: flex; gap: 10px; margin-top: 20px; }
+.btn-cancel {
+  flex: 1; padding: 12px;
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-sm);
+  color: var(--text2);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 14px; font-weight: 600;
+  cursor: pointer;
+}
+.btn-confirm {
+  flex: 2; padding: 12px;
+  background: linear-gradient(135deg, var(--accent), var(--purple));
+  border: none;
+  border-radius: var(--radius-sm);
+  color: white;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 14px; font-weight: 600;
+  cursor: pointer;
+}
+.device-detail-header {
+  display: flex; align-items: center; gap: 14px;
+  margin-bottom: 24px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+}
+.detail-avatar {
+  width: 56px; height: 56px;
+  border-radius: 16px;
+  background: var(--surface2);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 24px;
+}
+.detail-actions-grid {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 10px; margin-top: 16px;
+}
+.detail-action {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  cursor: pointer;
+  text-align: center;
+  transition: all var(--transition);
+}
+.detail-action:hover { border-color: var(--border2); background: var(--surface3); }
+.detail-action .da-icon { font-size: 22px; margin-bottom: 6px; }
+.detail-action .da-label { font-size: 12px; font-weight: 600; color: var(--text2); }
+
+/* ─── CATEGORIES ─── */
+.cat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+@media (max-width: 400px) { .cat-grid { grid-template-columns: repeat(2, 1fr); } }
+.cat-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 12px;
+  text-align: center;
+  transition: all var(--transition);
+}
+.cat-icon { font-size: 24px; margin-bottom: 6px; }
+.cat-name { font-size: 12px; font-weight: 600; color: var(--text2); margin-bottom: 8px; }
+
+/* ─── TOAST ─── */
+.toast-container {
+  position: fixed; top: 70px; right: 16px; z-index: 999;
+  display: flex; flex-direction: column; gap: 8px;
+  pointer-events: none;
+}
+.toast {
+  background: var(--surface);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+  font-size: 13px; font-weight: 500;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  animation: slideIn 0.3s ease;
+  max-width: 260px;
+}
+.toast.success { border-left: 3px solid var(--green); }
+.toast.error { border-left: 3px solid var(--red); }
+@keyframes slideIn {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+/* ─── EMPTY STATE ─── */
+.empty-state {
+  text-align: center; padding: 40px 20px;
+  color: var(--text3);
+}
+.empty-state .empty-icon { font-size: 40px; margin-bottom: 12px; }
+.empty-state p { font-size: 14px; }
+
+/* ─── LOADING ─── */
+.spinner {
+  display: inline-block;
+  width: 20px; height: 20px;
+  border: 2px solid var(--surface3);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ─── SETTINGS ─── */
+.settings-group { margin-bottom: 24px; }
+.settings-item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 8px;
+}
+.settings-label { font-size: 14px; font-weight: 500; }
+.settings-sub { font-size: 12px; color: var(--text2); margin-top: 2px; }
+
+/* ─── PROFILE SELECTOR ─── */
+.profile-tabs {
+  display: flex; gap: 6px;
+  margin-bottom: 20px;
+}
+.profile-tab {
+  flex: 1; padding: 8px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text2);
+  font-size: 12px; font-weight: 600;
+  cursor: pointer; text-align: center;
+  transition: all var(--transition);
+}
+.profile-tab.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+/* ─── RESPONSIVE ─── */
+@media (max-width: 480px) {
+  .login-card { padding: 32px 24px; }
+  .stat-value { font-size: 22px; }
+}
+
+/* ─── PULSE ANIM ─── */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+.pulsing { animation: pulse 2s ease infinite; }
+
+/* ─── INFO CHIP ─── */
+.info-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 20px; padding: 4px 10px;
+  font-size: 11px; color: var(--text2);
+  font-family: 'DM Mono', monospace;
+}
+</style>
+</head>
+<body>
+
+<!-- ─── LOGIN ─── -->
+<div id="login-screen">
+  <div class="login-card">
+    <div class="login-logo">
+      <div class="logo-icon">🛡️</div>
+      <h1>GuardianPi</h1>
+      <p>Contrôle parental réseau</p>
+    </div>
+    <div id="login-error" class="login-error">Identifiants incorrects</div>
+    <div class="login-field">
+      <label>Identifiant</label>
+      <input type="text" id="login-user" value="admin" autocomplete="username">
+    </div>
+    <div class="login-field">
+      <label>Mot de passe</label>
+      <input type="password" id="login-pass" value="" autocomplete="current-password" placeholder="guardianpi">
+    </div>
+    <button class="btn-primary" onclick="doLogin()">Se connecter</button>
+  </div>
+</div>
+
+<!-- ─── APP ─── -->
+<div id="app">
+  <!-- TOPBAR -->
+  <div class="topbar">
+    <div class="topbar-logo">
+      <div class="mini-icon">🛡️</div>
+      <span>GuardianPi</span>
+    </div>
+    <div class="topbar-actions">
+      <div class="status-pill">
+        <div class="status-dot" id="global-dot"></div>
+        <span id="online-count">0 en ligne</span>
+      </div>
+      <button class="icon-btn" onclick="showView('settings')" title="Paramètres">⚙️</button>
+      <button class="icon-btn" onclick="doLogout()" title="Déconnexion">🚪</button>
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <div class="main">
+
+    <!-- PAUSE BANNER -->
+    <div class="pause-banner" id="pause-banner">
+      <div class="pause-banner-text">
+        <span style="font-size:20px">🔴</span>
+        <div>
+          <strong style="font-size:15px">Pause globale activée</strong>
+          <div style="font-size:12px;color:var(--text2);margin-top:2px">Tout internet est coupé</div>
+        </div>
+      </div>
+      <button class="btn-primary" style="width:auto;padding:8px 16px;font-size:13px" onclick="toggleGlobalPause()">Reprendre</button>
+    </div>
+
+    <!-- VIEW: HOME -->
+    <div class="view active" id="view-home">
+
+      <!-- Stats -->
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="stat-label">En ligne</div>
+          <div class="stat-value" id="stat-online">—</div>
+          <div class="stat-sub">appareils</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Bloqués</div>
+          <div class="stat-value" id="stat-blocked">—</div>
+          <div class="stat-sub">appareils</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">CPU Temp</div>
+          <div class="stat-value" id="stat-temp">—</div>
+          <div class="stat-sub">degrés</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Uptime</div>
+          <div class="stat-value" style="font-size:16px" id="stat-uptime">—</div>
+          <div class="stat-sub">actif depuis</div>
+        </div>
+      </div>
+
+      <!-- Quick Actions -->
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">Actions rapides</span>
+        </div>
+        <div class="quick-grid">
+          <button class="quick-btn danger" onclick="toggleGlobalPause()" id="global-pause-btn">
+            <div class="qb-icon">⏸️</div>
+            <div class="qb-text">
+              <strong>Pause globale</strong>
+              <span>Couper tout internet</span>
+            </div>
+          </button>
+          <button class="quick-btn blue" onclick="refreshDevices()">
+            <div class="qb-icon">🔄</div>
+            <div class="qb-text">
+              <strong>Scanner réseau</strong>
+              <span>Détecter appareils</span>
+            </div>
+          </button>
+          <button class="quick-btn orange" onclick="showView('rules')">
+            <div class="qb-icon">🚫</div>
+            <div class="qb-text">
+              <strong>Bloquer site</strong>
+              <span>Ajouter une règle</span>
+            </div>
+          </button>
+          <button class="quick-btn success" onclick="showView('schedules')">
+            <div class="qb-icon">📅</div>
+            <div class="qb-text">
+              <strong>Planning</strong>
+              <span>Horaires internet</span>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      <!-- Devices -->
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">Appareils</span>
+          <button class="section-action" onclick="refreshDevices()">↻ Actualiser</button>
+        </div>
+        <div class="devices-list" id="devices-list">
+          <div class="empty-state">
+            <div class="spinner"></div>
+            <p style="margin-top:12px">Chargement...</p>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- end view-home -->
+
+    <!-- VIEW: RULES -->
+    <div class="view" id="view-rules">
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">Filtrage par catégorie</span>
+        </div>
+        <div class="cat-grid" id="cat-grid">
+          <!-- Généré JS -->
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">Règles personnalisées</span>
+          <button class="section-action" onclick="openModal('modal-rule')">+ Ajouter</button>
+        </div>
+        <div id="rules-list">
+          <div class="empty-state">
+            <div class="empty-icon">📋</div>
+            <p>Aucune règle personnalisée</p>
+          </div>
+        </div>
+      </div>
+    </div><!-- end view-rules -->
+
+    <!-- VIEW: SCHEDULES -->
+    <div class="view" id="view-schedules">
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">Plannings horaires</span>
+          <button class="section-action" onclick="openModal('modal-schedule')">+ Ajouter</button>
+        </div>
+        <div id="schedules-list">
+          <div class="empty-state">
+            <div class="empty-icon">🕐</div>
+            <p>Aucun planning configuré</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- VIEW: SETTINGS -->
+    <div class="view" id="view-settings">
+      <div class="settings-group">
+        <div class="section-header"><span class="section-title">Système</span></div>
+
+        <div class="settings-item">
+          <div>
+            <div class="settings-label">Adresse IP locale</div>
+            <div class="settings-sub" id="local-ip-display">Chargement...</div>
+          </div>
+          <div class="info-chip" id="local-ip-chip">—</div>
+        </div>
+
+        <div class="settings-item">
+          <div>
+            <div class="settings-label">Température CPU</div>
+            <div class="settings-sub">Raspberry Pi 3B</div>
+          </div>
+          <div class="info-chip" id="settings-temp">—</div>
+        </div>
+
+        <div class="settings-item">
+          <div>
+            <div class="settings-label">Mode vacances</div>
+            <div class="settings-sub">Désactive toutes les restrictions</div>
+          </div>
+          <button class="toggle" id="vacation-toggle" onclick="toggleVacation(this)"></button>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <div class="section-header"><span class="section-title">Sécurité</span></div>
+        <div class="settings-item" style="cursor:pointer" onclick="openModal('modal-password')">
+          <div>
+            <div class="settings-label">Changer le mot de passe</div>
+            <div class="settings-sub">Accès au dashboard</div>
+          </div>
+          <span style="color:var(--text2)">→</span>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <div class="section-header"><span class="section-title">À propos</span></div>
+        <div class="settings-item">
+          <div>
+            <div class="settings-label">GuardianPi</div>
+            <div class="settings-sub">Routeur parental intelligent v1.0</div>
+          </div>
+          <span style="color:var(--text3);font-size:12px">v1.0.0</span>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- end main -->
+
+  <!-- BOTTOM NAV -->
+  <div class="bottom-nav">
+    <button class="nav-item active" id="nav-home" onclick="showView('home')">
+      <span class="nav-icon">🏠</span>
+      <span class="nav-label">Accueil</span>
+    </button>
+    <button class="nav-item" id="nav-rules" onclick="showView('rules')">
+      <span class="nav-icon">🚫</span>
+      <span class="nav-label">Règles</span>
+    </button>
+    <button class="nav-item" id="nav-schedules" onclick="showView('schedules')">
+      <span class="nav-icon">📅</span>
+      <span class="nav-label">Planning</span>
+    </button>
+    <button class="nav-item" id="nav-settings" onclick="showView('settings')">
+      <span class="nav-icon">⚙️</span>
+      <span class="nav-label">Réglages</span>
+    </button>
+  </div>
+</div>
+
+<!-- ─── MODALS ─── -->
+
+<!-- Device Detail Modal -->
+<div class="modal-overlay" id="modal-device">
+  <div class="modal">
+    <div class="modal-title" id="modal-device-title">Appareil</div>
+    <div class="device-detail-header">
+      <div class="detail-avatar" id="modal-device-emoji">📱</div>
+      <div>
+        <div style="font-size:16px;font-weight:700" id="modal-device-name">—</div>
+        <div style="font-size:13px;color:var(--text2);margin-top:4px" id="modal-device-ip">—</div>
+        <div style="font-size:11px;font-family:'DM Mono',monospace;color:var(--text3);margin-top:2px" id="modal-device-mac">—</div>
+      </div>
+    </div>
+
+    <div class="form-row">
+      <label class="form-label">Nom personnalisé</label>
+      <input type="text" class="form-input" id="modal-device-rename" placeholder="Ex: iPhone Emma">
+    </div>
+
+    <div class="form-row">
+      <label class="form-label">Profil</label>
+      <div class="profile-tabs">
+        <button class="profile-tab" data-profile="child" onclick="selectProfile(this)">👶 Enfant</button>
+        <button class="profile-tab" data-profile="teen" onclick="selectProfile(this)">🧒 Ado</button>
+        <button class="profile-tab active" data-profile="adult" onclick="selectProfile(this)">👤 Adulte</button>
+      </div>
+    </div>
+
+    <div class="detail-actions-grid">
+      <div class="detail-action" id="modal-block-btn" onclick="modalToggleBlock()">
+        <div class="da-icon">🚫</div>
+        <div class="da-label" id="modal-block-label">Bloquer</div>
+      </div>
+      <div class="detail-action" id="modal-pause-btn" onclick="modalTogglePause()">
+        <div class="da-icon">⏸️</div>
+        <div class="da-label" id="modal-pause-label">Pause</div>
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal('modal-device')">Fermer</button>
+      <button class="btn-confirm" onclick="saveDeviceDetail()">💾 Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Rule Modal -->
+<div class="modal-overlay" id="modal-rule">
+  <div class="modal">
+    <div class="modal-title">Nouvelle règle</div>
+    <div class="form-row">
+      <label class="form-label">Type</label>
+      <select class="form-select" id="rule-type" onchange="updateRuleForm()">
+        <option value="block_category">Bloquer une catégorie</option>
+        <option value="block_domain">Bloquer un site</option>
+        <option value="whitelist_domain">Autoriser un site</option>
+      </select>
+    </div>
+    <div class="form-row" id="rule-cat-row">
+      <label class="form-label">Catégorie</label>
+      <select class="form-select" id="rule-category">
+        <option value="adult">🔞 Adultes</option>
+        <option value="gambling">🎰 Jeux d'argent</option>
+        <option value="social">📱 Réseaux sociaux</option>
+        <option value="streaming">🎬 Streaming</option>
+        <option value="gaming">🎮 Jeux vidéo</option>
+        <option value="ads">📢 Publicités</option>
+      </select>
+    </div>
+    <div class="form-row" id="rule-domain-row" style="display:none">
+      <label class="form-label">Domaine (ex: tiktok.com)</label>
+      <input type="text" class="form-input" id="rule-domain" placeholder="exemple.com">
+    </div>
+    <div class="form-row">
+      <label class="form-label">Appareil (optionnel)</label>
+      <select class="form-select" id="rule-device">
+        <option value="global">🌐 Tous les appareils</option>
+      </select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal('modal-rule')">Annuler</button>
+      <button class="btn-confirm" onclick="createRule()">Créer la règle</button>
+    </div>
+  </div>
+</div>
+
+<!-- Schedule Modal -->
+<div class="modal-overlay" id="modal-schedule">
+  <div class="modal">
+    <div class="modal-title">Nouveau planning</div>
+    <div class="form-row">
+      <label class="form-label">Appareil</label>
+      <select class="form-select" id="sched-device"></select>
+    </div>
+    <div class="form-row">
+      <label class="form-label">Nom du planning</label>
+      <input type="text" class="form-input" id="sched-name" placeholder="Ex: Soir semaine">
+    </div>
+    <div class="form-row">
+      <label class="form-label">Jours</label>
+      <div class="days-selector">
+        <button class="day-toggle selected" data-day="mon">Lun</button>
+        <button class="day-toggle selected" data-day="tue">Mar</button>
+        <button class="day-toggle selected" data-day="wed">Mer</button>
+        <button class="day-toggle selected" data-day="thu">Jeu</button>
+        <button class="day-toggle selected" data-day="fri">Ven</button>
+        <button class="day-toggle" data-day="sat">Sam</button>
+        <button class="day-toggle" data-day="sun">Dim</button>
+      </div>
+    </div>
+    <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div>
+        <label class="form-label">Début (internet ON)</label>
+        <input type="time" class="form-input" id="sched-start" value="18:00">
+      </div>
+      <div>
+        <label class="form-label">Fin (internet OFF)</label>
+        <input type="time" class="form-input" id="sched-end" value="20:00">
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal('modal-schedule')">Annuler</button>
+      <button class="btn-confirm" onclick="createSchedule()">Créer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Password Modal -->
+<div class="modal-overlay" id="modal-password">
+  <div class="modal">
+    <div class="modal-title">Changer le mot de passe</div>
+    <div class="form-row">
+      <label class="form-label">Mot de passe actuel</label>
+      <input type="password" class="form-input" id="pw-current">
+    </div>
+    <div class="form-row">
+      <label class="form-label">Nouveau mot de passe</label>
+      <input type="password" class="form-input" id="pw-new">
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal('modal-password')">Annuler</button>
+      <button class="btn-confirm" onclick="changePassword()">Confirmer</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast-container" id="toast-container"></div>
+
+<script>
+// ─────────────────────────────────────────────
+// CONFIG
+// ─────────────────────────────────────────────
+const API = '';  // Même origin
+let TOKEN = localStorage.getItem('gpi_token') || '';
+let devices = [];
+let rules = [];
+let schedules = [];
+let globalPaused = false;
+let currentDeviceMAC = null;
+let vacationMode = false;
+
+const DEVICE_ICONS = {
+  iphone: '📱', ipad: '📲', android: '📱',
+  laptop: '💻', macbook: '💻', pc: '🖥️',
+  tv: '📺', samsung: '📺', sony: '📺',
+  xbox: '🎮', playstation: '🎮',
+  default: '📡'
+};
+
+function getDeviceIcon(name) {
+  const n = name.toLowerCase();
+  if (n.includes('iphone') || n.includes('mobile')) return '📱';
+  if (n.includes('ipad') || n.includes('tablet')) return '📲';
+  if (n.includes('laptop') || n.includes('macbook') || n.includes('pc') || n.includes('ordinateur')) return '💻';
+  if (n.includes('tv') || n.includes('samsung') || n.includes('smart')) return '📺';
+  if (n.includes('xbox') || n.includes('playstation') || n.includes('nintendo')) return '🎮';
+  if (n.includes('printer') || n.includes('imprimante')) return '🖨️';
+  return '📡';
+}
+
+// ─────────────────────────────────────────────
+// API CALLS
+// ─────────────────────────────────────────────
+async function api(method, path, body) {
+  const opts = {
+    method,
+    headers: { 'Content-Type': 'application/json' }
+  };
+  if (TOKEN) opts.headers['Authorization'] = `Bearer ${TOKEN}`;
+  if (body) opts.body = JSON.stringify(body);
+  
+  const res = await fetch(API + path, opts);
+  if (res.status === 401) {
+    TOKEN = '';
+    localStorage.removeItem('gpi_token');
+    showLogin();
+    return null;
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Erreur serveur');
+  }
+  return res.json().catch(() => null);
+}
+
+// ─────────────────────────────────────────────
+// AUTH
+// ─────────────────────────────────────────────
+async function doLogin() {
+  const user = document.getElementById('login-user').value;
+  const pass = document.getElementById('login-pass').value;
+  const err = document.getElementById('login-error');
+  err.style.display = 'none';
+  
+  try {
+    const data = await api('POST', '/api/auth/login', { username: user, password: pass });
+    if (!data) return;
+    TOKEN = data.token;
+    localStorage.setItem('gpi_token', TOKEN);
+    showApp();
+  } catch(e) {
+    err.style.display = 'block';
+    err.textContent = e.message;
+  }
+}
+
+async function doLogout() {
+  await api('POST', '/api/auth/logout').catch(() => {});
+  TOKEN = '';
+  localStorage.removeItem('gpi_token');
+  showLogin();
+}
+
+function showLogin() {
+  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('app').style.display = 'none';
+}
+function showApp() {
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  initApp();
+}
+
+document.getElementById('login-pass').addEventListener('keydown', e => {
+  if (e.key === 'Enter') doLogin();
+});
+
+// ─────────────────────────────────────────────
+// INIT
+// ─────────────────────────────────────────────
+async function initApp() {
+  await Promise.all([loadDevices(), loadStatus(), loadRules(), loadSchedules()]);
+  buildCategoryGrid();
+  setInterval(loadStatus, 30000);
+  setInterval(loadDevices, 20000);
+}
+
+// ─────────────────────────────────────────────
+// STATUS
+// ─────────────────────────────────────────────
+async function loadStatus() {
+  try {
+    const s = await api('GET', '/api/global/status');
+    if (!s) return;
+    
+    globalPaused = s.global_pause;
+    document.getElementById('stat-temp').textContent = s.cpu_temp + '°';
+    document.getElementById('stat-uptime').textContent = s.uptime.replace('up ', '').replace('hours', 'h').replace('minutes', 'min') || '—';
+    document.getElementById('local-ip-chip').textContent = s.local_ip || '—';
+    document.getElementById('local-ip-display').textContent = 'http://' + (s.local_ip || '192.168.1.x');
+    document.getElementById('settings-temp').textContent = s.cpu_temp + '°C';
+    document.getElementById('online-count').textContent = s.online_devices + ' en ligne';
+    
+    // Pause banner
+    const banner = document.getElementById('pause-banner');
+    banner.classList.toggle('active', globalPaused);
+    
+    const pauseBtn = document.getElementById('global-pause-btn');
+    if (globalPaused) {
+      pauseBtn.querySelector('strong').textContent = 'Reprendre internet';
+      pauseBtn.querySelector('span').textContent = 'Tout est coupé';
+      pauseBtn.querySelector('.qb-icon').textContent = '▶️';
+    } else {
+      pauseBtn.querySelector('strong').textContent = 'Pause globale';
+      pauseBtn.querySelector('span').textContent = 'Couper tout internet';
+      pauseBtn.querySelector('.qb-icon').textContent = '⏸️';
+    }
+  } catch(e) { console.warn('Status error:', e); }
+}
+
+// ─────────────────────────────────────────────
+// DEVICES
+// ─────────────────────────────────────────────
+async function loadDevices() {
+  try {
+    devices = await api('GET', '/api/devices') || [];
+    renderDevices();
+    updateStats();
+    populateDeviceSelects();
+  } catch(e) { console.warn('Devices error:', e); }
+}
+
+async function refreshDevices() {
+  document.getElementById('devices-list').innerHTML = '<div class="empty-state"><div class="spinner"></div><p style="margin-top:12px">Scan en cours...</p></div>';
+  await loadDevices();
+  toast('Réseau scanné ✓', 'success');
+}
+
+function renderDevices() {
+  const list = document.getElementById('devices-list');
+  
+  if (!devices.length) {
+    list.innerHTML = '<div class="empty-state"><div class="empty-icon">📡</div><p>Aucun appareil détecté</p></div>';
+    return;
+  }
+  
+  // Trier: online first, blocked last
+  const sorted = [...devices].sort((a, b) => {
+    if (a.online !== b.online) return b.online - a.online;
+    if (a.blocked !== b.blocked) return a.blocked - b.blocked;
+    return a.name.localeCompare(b.name);
+  });
+  
+  list.innerHTML = sorted.map(d => {
+    const icon = getDeviceIcon(d.name || d.hostname);
+    const isBlocked = d.blocked || d.schedule_blocked;
+    const avatarClass = isBlocked ? 'blocked' : (d.online ? 'online' : 'offline');
+    const dotHtml = d.online
+      ? (isBlocked ? '' : '<div class="online-dot"></div>')
+      : '<div class="offline-dot"></div>';
+    
+    let badges = '';
+    if (d.profile && d.profile !== 'adult') {
+      badges += `<span class="device-badge badge-${d.profile}">${d.profile === 'child' ? '👶' : '🧒'} ${d.profile === 'child' ? 'Enfant' : 'Ado'}</span>`;
+    }
+    if (d.blocked) badges += `<span class="device-badge badge-blocked">bloqué</span>`;
+    else if (d.paused) badges += `<span class="device-badge badge-paused">pause</span>`;
+    else if (d.schedule_blocked) badges += `<span class="device-badge badge-schedule">planning</span>`;
+    
+    const isOn = d.online && !isBlocked;
+    
+    return `
+      <div class="device-card ${isBlocked ? 'blocked' : ''} ${!d.online ? 'offline' : ''}">
+        <div class="device-avatar ${avatarClass}">
+          ${icon}${dotHtml}
+        </div>
+        <div class="device-info">
+          <div class="device-name">${escHtml(d.name || d.hostname)}</div>
+          <div class="device-meta">
+            <span class="device-ip">${d.ip}</span>
+            ${badges}
+          </div>
+        </div>
+        <div class="device-actions">
+          <button
+            class="toggle ${isOn ? 'on' : (isBlocked ? 'blocked-state' : '')}"
+            onclick="quickToggle('${d.mac}', ${isBlocked})"
+            title="${isBlocked ? 'Débloquer' : 'Bloquer'}"
+          ></button>
+          <button class="action-icon-btn" onclick="openDeviceDetail('${d.mac}')" title="Détails">⋯</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+async function quickToggle(mac, currentlyBlocked) {
+  try {
+    const update = currentlyBlocked
+      ? { blocked: false, paused: false }
+      : { blocked: true };
+    
+    await api('PATCH', `/api/devices/${encodeURIComponent(mac)}`, update);
+    
+    // Mise à jour locale immédiate
+    const d = devices.find(x => x.mac === mac);
+    if (d) {
+      if (currentlyBlocked) { d.blocked = false; d.paused = false; }
+      else d.blocked = true;
+    }
+    renderDevices();
+    toast(currentlyBlocked ? 'Internet rétabli ✓' : 'Appareil bloqué ✓', currentlyBlocked ? 'success' : 'error');
+  } catch(e) { toast('Erreur: ' + e.message, 'error'); }
+}
+
+function updateStats() {
+  const online = devices.filter(d => d.online).length;
+  const blocked = devices.filter(d => d.blocked || d.paused).length;
+  document.getElementById('stat-online').textContent = online;
+  document.getElementById('stat-blocked').textContent = blocked;
+}
+
+function populateDeviceSelects() {
+  const opts = devices.map(d =>
+    `<option value="${escHtml(d.mac)}">${escHtml(d.name || d.hostname)} (${d.ip})</option>`
+  ).join('');
+  
+  document.getElementById('rule-device').innerHTML =
+    `<option value="global">🌐 Tous les appareils</option>` + opts;
+  document.getElementById('sched-device').innerHTML = opts ||
+    `<option value="">Aucun appareil</option>`;
+}
+
+// ─────────────────────────────────────────────
+// DEVICE DETAIL
+// ─────────────────────────────────────────────
+function openDeviceDetail(mac) {
+  const d = devices.find(x => x.mac === mac);
+  if (!d) return;
+  
+  currentDeviceMAC = mac;
+  document.getElementById('modal-device-title').textContent = 'Appareil';
+  document.getElementById('modal-device-name').textContent = d.name || d.hostname;
+  document.getElementById('modal-device-ip').textContent = d.online ? '🟢 En ligne — ' + d.ip : '⚫ Hors ligne';
+  document.getElementById('modal-device-mac').textContent = mac;
+  document.getElementById('modal-device-emoji').textContent = getDeviceIcon(d.name || d.hostname);
+  document.getElementById('modal-device-rename').value = d.name || d.hostname;
+  
+  // Profil
+  document.querySelectorAll('.profile-tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.profile === (d.profile || 'adult'));
+  });
+  
+  // Block button
+  updateModalBlockBtn(d.blocked, d.paused);
+  
+  openModal('modal-device');
+}
+
+function updateModalBlockBtn(blocked, paused) {
+  const btn = document.getElementById('modal-block-btn');
+  const lbl = document.getElementById('modal-block-label');
+  if (blocked) {
+    btn.style.background = 'var(--red-dim)';
+    lbl.textContent = 'Débloquer';
+  } else {
+    btn.style.background = '';
+    lbl.textContent = 'Bloquer';
+  }
+  
+  const pbtn = document.getElementById('modal-pause-btn');
+  const plbl = document.getElementById('modal-pause-label');
+  if (paused) {
+    pbtn.style.background = 'var(--orange-dim)';
+    plbl.textContent = 'Reprendre';
+  } else {
+    pbtn.style.background = '';
+    plbl.textContent = 'Pause';
+  }
+}
+
+async function modalToggleBlock() {
+  const d = devices.find(x => x.mac === currentDeviceMAC);
+  if (!d) return;
+  d.blocked = !d.blocked;
+  if (d.blocked) d.paused = false;
+  updateModalBlockBtn(d.blocked, d.paused);
+}
+
+async function modalTogglePause() {
+  const d = devices.find(x => x.mac === currentDeviceMAC);
+  if (!d) return;
+  d.paused = !d.paused;
+  if (d.paused) d.blocked = false;
+  updateModalBlockBtn(d.blocked, d.paused);
+}
+
+function selectProfile(btn) {
+  document.querySelectorAll('.profile-tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+async function saveDeviceDetail() {
+  const d = devices.find(x => x.mac === currentDeviceMAC);
+  if (!d) return;
+  
+  const newName = document.getElementById('modal-device-rename').value.trim();
+  const newProfile = document.querySelector('.profile-tab.active')?.dataset.profile || 'adult';
+  
+  try {
+    await api('PATCH', `/api/devices/${encodeURIComponent(currentDeviceMAC)}`, {
+      name: newName || undefined,
+      blocked: d.blocked,
+      paused: d.paused,
+      profile: newProfile
+    });
+    
+    d.name = newName || d.name;
+    d.profile = newProfile;
+    
+    closeModal('modal-device');
+    renderDevices();
+    toast('Appareil mis à jour ✓', 'success');
+  } catch(e) { toast('Erreur: ' + e.message, 'error'); }
+}
+
+// ─────────────────────────────────────────────
+// GLOBAL PAUSE
+// ─────────────────────────────────────────────
+async function toggleGlobalPause() {
+  try {
+    const newState = !globalPaused;
+    await api('POST', '/api/global/pause', { paused: newState });
+    globalPaused = newState;
+    await loadStatus();
+    toast(newState ? '⏸ Internet coupé pour tous' : '▶ Internet rétabli', newState ? 'error' : 'success');
+  } catch(e) { toast('Erreur: ' + e.message, 'error'); }
+}
+
+// ─────────────────────────────────────────────
+// RULES
+// ─────────────────────────────────────────────
+async function loadRules() {
+  try {
+    rules = await api('GET', '/api/rules') || [];
+    renderRules();
+  } catch(e) {}
+}
+
+const CAT_INFO = {
+  adult: { icon: '🔞', label: 'Adultes', color: 'var(--red-dim)' },
+  gambling: { icon: '🎰', label: 'Jeux d\'argent', color: 'var(--orange-dim)' },
+  social: { icon: '📱', label: 'Réseaux sociaux', color: 'var(--blue-dim)' },
+  streaming: { icon: '🎬', label: 'Streaming', color: 'var(--purple-dim)' },
+  gaming: { icon: '🎮', label: 'Jeux vidéo', color: 'rgba(20,184,166,0.15)' },
+  ads: { icon: '📢', label: 'Publicités', color: 'rgba(234,179,8,0.15)' },
+};
+
+function buildCategoryGrid() {
+  const grid = document.getElementById('cat-grid');
+  grid.innerHTML = Object.entries(CAT_INFO).map(([id, info]) => {
+    const active = rules.some(r => r.type === 'block_category' && r.value === id && r.enabled);
+    return `
+      <div class="cat-card" onclick="toggleCategory('${id}')" style="${active ? 'border-color:var(--red);background:var(--red-dim)' : ''}">
+        <div class="cat-icon">${info.icon}</div>
+        <div class="cat-name">${info.label}</div>
+        <button class="toggle ${active ? 'on blocked-state' : ''}" style="margin:0 auto;display:block" onclick="event.stopPropagation();toggleCategory('${id}')"></button>
+      </div>
+    `;
+  }).join('');
+}
+
+async function toggleCategory(catId) {
+  const existing = rules.find(r => r.type === 'block_category' && r.value === catId);
+  try {
+    if (existing) {
+      await api('DELETE', `/api/rules/${existing.id}`);
+      rules = rules.filter(r => r.id !== existing.id);
+    } else {
+      const r = await api('POST', '/api/rules', { mac: 'global', type: 'block_category', value: catId, enabled: true });
+      if (r) rules.push(r);
+    }
+    buildCategoryGrid();
+    renderRules();
+    toast(existing ? 'Catégorie débloquée' : 'Catégorie bloquée ✓', existing ? 'success' : 'error');
+  } catch(e) { toast('Erreur: ' + e.message, 'error'); }
+}
+
+function renderRules() {
+  const list = document.getElementById('rules-list');
+  const custom = rules.filter(r => r.type !== 'block_category');
+  
+  if (!custom.length) {
+    list.innerHTML = '<div class="empty-state"><div class="empty-icon">📋</div><p>Aucune règle personnalisée</p></div>';
+    return;
+  }
+  
+  list.innerHTML = custom.map(r => {
+    const icon = r.type === 'whitelist_domain' ? '✅' : '🚫';
+    const bg = r.type === 'whitelist_domain' ? 'var(--green-dim)' : 'var(--red-dim)';
+    const device = devices.find(d => d.mac === r.mac);
+    const deviceName = r.mac === 'global' ? 'Tous' : (device?.name || r.mac.slice(-8));
+    
+    return `
+      <div class="rule-card">
+        <div class="rule-icon" style="background:${bg}">${icon}</div>
+        <div class="rule-info">
+          <div class="rule-name">${escHtml(r.value)}</div>
+          <div class="rule-sub">${r.type === 'whitelist_domain' ? 'Autorisé' : 'Bloqué'} — ${deviceName}</div>
+        </div>
+        <button class="action-icon-btn" onclick="deleteRule('${r.id}')" title="Supprimer">🗑️</button>
+      </div>
+    `;
+  }).join('');
+}
+
+function updateRuleForm() {
+  const type = document.getElementById('rule-type').value;
+  document.getElementById('rule-cat-row').style.display = type === 'block_category' ? '' : 'none';
+  document.getElementById('rule-domain-row').style.display = type !== 'block_category' ? '' : 'none';
+}
+
+async function createRule() {
+  const type = document.getElementById('rule-type').value;
+  const mac = document.getElementById('rule-device').value;
+  let value;
+  
+  if (type === 'block_category') {
+    value = document.getElementById('rule-category').value;
+  } else {
+    value = document.getElementById('rule-domain').value.trim().toLowerCase().replace(/^https?:\/\//, '');
+    if (!value) { toast('Entrez un domaine', 'error'); return; }
+  }
+  
+  try {
+    const r = await api('POST', '/api/rules', { mac, type, value, enabled: true });
+    if (r) rules.push(r);
+    closeModal('modal-rule');
+    renderRules();
+    buildCategoryGrid();
+    toast('Règle créée ✓', 'success');
+  } catch(e) { toast('Erreur: ' + e.message, 'error'); }
+}
+
+async function deleteRule(id) {
+  try {
+    await api('DELETE', `/api/rules/${id}`);
+    rules = rules.filter(r => r.id !== id);
+    renderRules();
+    buildCategoryGrid();
+    toast('Règle supprimée', 'success');
+  } catch(e) { toast('Erreur', 'error'); }
+}
+
+// ─────────────────────────────────────────────
+// SCHEDULES
+// ─────────────────────────────────────────────
+async function loadSchedules() {
+  try {
+    schedules = await api('GET', '/api/schedules') || [];
+    renderSchedules();
+  } catch(e) {}
+}
+
+function renderSchedules() {
+  const list = document.getElementById('schedules-list');
+  if (!schedules.length) {
+    list.innerHTML = '<div class="empty-state"><div class="empty-icon">🕐</div><p>Aucun planning configuré</p></div>';
+    return;
+  }
+  
+  const DAYS = ['lun', 'mar', 'mer', 'jeu', 'ven', 'sam', 'dim'];
+  const DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+  
+  list.innerHTML = schedules.map(s => {
+    const device = devices.find(d => d.mac === s.mac);
+    const deviceName = device?.name || s.mac.slice(-8);
+    
+    const daysHtml = DAY_KEYS.map((k, i) =>
+      `<div class="day-chip ${s.days.includes(k) ? 'active' : 'inactive'}">${DAYS[i]}</div>`
+    ).join('');
+    
+    return `
+      <div class="schedule-card">
+        <div class="schedule-header">
+          <div>
+            <div class="schedule-title">${escHtml(s.name)}</div>
+            <div class="schedule-device">📡 ${escHtml(deviceName)}</div>
+          </div>
+          <div style="text-align:right">
+            <div class="schedule-time">${s.start_time}–${s.end_time}</div>
+            <button class="action-icon-btn" style="margin-top:6px;margin-left:auto" onclick="deleteSchedule('${s.id}')">🗑️</button>
+          </div>
+        </div>
+        <div class="schedule-days">${daysHtml}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+document.querySelectorAll('.day-toggle').forEach(btn => {
+  btn.addEventListener('click', () => btn.classList.toggle('selected'));
+});
+
+async function createSchedule() {
+  const mac = document.getElementById('sched-device').value;
+  const name = document.getElementById('sched-name').value.trim();
+  const start = document.getElementById('sched-start').value;
+  const end = document.getElementById('sched-end').value;
+  const days = [...document.querySelectorAll('.day-toggle.selected')].map(b => b.dataset.day);
+  
+  if (!mac || !name) { toast('Remplissez tous les champs', 'error'); return; }
+  if (!days.length) { toast('Sélectionnez au moins un jour', 'error'); return; }
+  
+  try {
+    const s = await api('POST', '/api/schedules', { mac, name, start_time: start, end_time: end, days, enabled: true });
+    if (s) schedules.push(s);
+    closeModal('modal-schedule');
+    renderSchedules();
+    toast('Planning créé ✓', 'success');
+  } catch(e) { toast('Erreur: ' + e.message, 'error'); }
+}
+
+async function deleteSchedule(id) {
+  try {
+    await api('DELETE', `/api/schedules/${id}`);
+    schedules = schedules.filter(s => s.id !== id);
+    renderSchedules();
+    toast('Planning supprimé', 'success');
+  } catch(e) { toast('Erreur', 'error'); }
+}
+
+// ─────────────────────────────────────────────
+// SETTINGS
+// ─────────────────────────────────────────────
+function toggleVacation(btn) {
+  vacationMode = !vacationMode;
+  btn.classList.toggle('on', vacationMode);
+  toast(vacationMode ? '🏖 Mode vacances activé — restrictions désactivées' : 'Mode normal rétabli', vacationMode ? 'success' : 'error');
+}
+
+async function changePassword() {
+  const cur = document.getElementById('pw-current').value;
+  const nw = document.getElementById('pw-new').value;
+  if (!cur || !nw) { toast('Remplissez les deux champs', 'error'); return; }
+  
+  try {
+    await api('POST', '/api/auth/change-password', { current_password: cur, new_password: nw });
+    closeModal('modal-password');
+    toast('Mot de passe changé ✓', 'success');
+  } catch(e) { toast('Erreur: ' + e.message, 'error'); }
+}
+
+// ─────────────────────────────────────────────
+// NAVIGATION
+// ─────────────────────────────────────────────
+function showView(name) {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('view-' + name)?.classList.add('active');
+  document.getElementById('nav-' + name)?.classList.add('active');
+  
+  if (name === 'rules') {
+    buildCategoryGrid();
+    renderRules();
+  }
+}
+
+// ─────────────────────────────────────────────
+// MODALS
+// ─────────────────────────────────────────────
+function openModal(id) {
+  document.getElementById(id).classList.add('open');
+}
+function closeModal(id) {
+  document.getElementById(id).classList.remove('open');
+}
+document.querySelectorAll('.modal-overlay').forEach(overlay => {
+  overlay.addEventListener('click', e => {
+    if (e.target === overlay) closeModal(overlay.id);
+  });
+});
+
+// ─────────────────────────────────────────────
+// TOAST
+// ─────────────────────────────────────────────
+function toast(msg, type = 'success') {
+  const container = document.getElementById('toast-container');
+  const t = document.createElement('div');
+  t.className = `toast ${type}`;
+  t.textContent = msg;
+  container.appendChild(t);
+  setTimeout(() => t.remove(), 3000);
+}
+
+// ─────────────────────────────────────────────
+// UTILS
+// ─────────────────────────────────────────────
+function escHtml(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ─────────────────────────────────────────────
+// STARTUP
+// ─────────────────────────────────────────────
+if (TOKEN) {
+  showApp();
+} else {
+  showLogin();
+}
+</script>
+</body>
+</html>
