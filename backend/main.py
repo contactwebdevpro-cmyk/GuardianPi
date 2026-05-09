@@ -246,14 +246,34 @@ def get_wifi_clients_count() -> int:
     except Exception:
         return len([d for d in get_connected_devices() if d.get("online")])
 
+def normalize_mac(mac: str) -> str:
+    """Normalise une adresse MAC en minuscules avec ':'"""
+    return mac.replace("-", ":").lower()
+
 def block_device_mac(mac: str, blocked: bool):
-    """Bloque/débloque un appareil via iptables (par adresse MAC)."""
-    mac_clean = mac.replace("-", ":").upper()
+    """Bloque/débloque un appareil via iptables (par adresse MAC).
+    
+    FIX: - MAC normalisé en minuscules (iptables est case-sensitive avec --mac-source)
+         - Déconnecte l'appareil du WiFi via hostapd si bloqué (sinon il garde sa session)
+         - Bloque aussi INPUT/OUTPUT pour couper totalement (pas seulement FORWARD)
+    """
+    mac_norm = normalize_mac(mac)
+    mac_upper = mac_norm.upper()  # iptables mac module accepte les deux, on force upper pour cohérence
+
     if blocked:
-        run_cmd(f"iptables -D FORWARD -m mac --mac-source {mac_clean} -j DROP 2>/dev/null")
-        run_cmd(f"iptables -I FORWARD -m mac --mac-source {mac_clean} -j DROP")
+        # Supprimer les règles existantes d'abord (évite les doublons)
+        run_cmd(f"iptables -D FORWARD -m mac --mac-source {mac_upper} -j DROP 2>/dev/null")
+        # Insérer en tête de chaîne pour priorité maximale
+        run_cmd(f"iptables -I FORWARD 1 -m mac --mac-source {mac_upper} -j DROP")
+        # Bloquer aussi les nouvelles connexions INPUT (ex: requêtes DNS vers le Pi)
+        run_cmd(f"iptables -D INPUT -m mac --mac-source {mac_upper} -j DROP 2>/dev/null")
+        run_cmd(f"iptables -I INPUT 1 -m mac --mac-source {mac_upper} -j DROP")
+        # Déconnecter l'appareil du WiFi immédiatement (sinon il garde sa session TCP)
+        run_cmd(f"hostapd_cli -i wlan0 deauthenticate {mac_norm} 2>/dev/null || true")
     else:
-        run_cmd(f"iptables -D FORWARD -m mac --mac-source {mac_clean} -j DROP 2>/dev/null")
+        # Supprimer toutes les règles de blocage pour cette MAC
+        run_cmd(f"iptables -D FORWARD -m mac --mac-source {mac_upper} -j DROP 2>/dev/null")
+        run_cmd(f"iptables -D INPUT -m mac --mac-source {mac_upper} -j DROP 2>/dev/null")
 
 def pause_device_mac(mac: str, paused: bool):
     block_device_mac(mac, paused)
@@ -291,7 +311,13 @@ def rebuild_dnsmasq_blocklist():
 
     BLOCKED_DOMAINS_FILE.parent.mkdir(parents=True, exist_ok=True)
     BLOCKED_DOMAINS_FILE.write_text("\n".join(lines) + "\n")
-    run_cmd("systemctl reload dnsmasq 2>/dev/null || pkill -HUP dnsmasq 2>/dev/null")
+
+    # FIX: reload seul ne relit pas conf-file sur tous les systèmes — forcer restart si reload échoue
+    rc, _, _ = run_cmd("systemctl reload dnsmasq 2>/dev/null")
+    if rc != 0:
+        run_cmd("systemctl restart dnsmasq 2>/dev/null")
+    # Laisser dnsmasq traiter le signal avant de retourner
+    import time as _time; _time.sleep(0.5)
 
 def rebuild_hostapd_conf(ssid: str, passphrase: str, channel: int, country: str, ap_if: str = "wlan0"):
     """Réécrit le fichier hostapd.conf et redémarre le hotspot."""
@@ -376,13 +402,48 @@ async def startup_event():
     restore_state()
 
 def restore_state():
-    devices = load_json(DEVICES_FILE, {})
+    """Restaure l'état au démarrage du service.
+    
+    FIX: - Vider les règles iptables orphelines avant de réappliquer
+         - Reconstruire le blocklist DNS
+         - Vérifier que dnsmasq tourne avant de rebuild
+    """
+    import time as _time
+
+    # Vider les règles FORWARD/INPUT existantes pour repartir propre
+    run_cmd("iptables -F FORWARD 2>/dev/null")
+    run_cmd("iptables -F INPUT 2>/dev/null")
+
+    # Remettre les règles de base (NAT forward + firewall)
     config  = get_config()
+    wan = config.get("interface_wan", "eth0")
+    ap  = config.get("interface_ap",  "wlan0")
+    run_cmd(f"iptables -A FORWARD -i {ap} -o {wan} -j ACCEPT")
+    run_cmd(f"iptables -A FORWARD -i {wan} -o {ap} -m state --state ESTABLISHED,RELATED -j ACCEPT")
+    run_cmd("iptables -A INPUT -p tcp --dport 8080 -j ACCEPT 2>/dev/null || true")
+    run_cmd("iptables -A INPUT -p tcp --dport 22 -j ACCEPT 2>/dev/null || true")
+    run_cmd(f"iptables -A INPUT -i {ap} -p udp --dport 53 -j ACCEPT 2>/dev/null || true")
+    run_cmd(f"iptables -A INPUT -i {ap} -p udp --dport 67 -j ACCEPT 2>/dev/null || true")
+    run_cmd("iptables -A INPUT -i lo -j ACCEPT 2>/dev/null || true")
+    run_cmd("iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true")
+
+    # Réappliquer les blocages par appareil
+    devices = load_json(DEVICES_FILE, {})
     for mac, device in devices.items():
         if device.get("blocked") or device.get("schedule_blocked"):
             block_device_mac(mac, True)
+
+    # Pause globale
     if config.get("global_pause"):
         apply_global_pause(True)
+
+    # Attendre que dnsmasq soit prêt avant de rebuild
+    for _ in range(5):
+        rc, _, _ = run_cmd("systemctl is-active dnsmasq 2>/dev/null")
+        if rc == 0:
+            break
+        _time.sleep(1)
+
     rebuild_dnsmasq_blocklist()
 
 # ─────────────────────────────────────────────
@@ -558,7 +619,8 @@ async def get_devices(auth=Depends(verify_token)):
 
 @app.patch("/api/devices/{mac}")
 async def update_device(mac: str, update: DeviceUpdate, auth=Depends(verify_token)):
-    mac = mac.lower().replace("-", ":")
+    # FIX: normaliser systématiquement la MAC pour cohérence avec iptables
+    mac = normalize_mac(mac)
     devices = load_json(DEVICES_FILE, {})
     device  = devices.get(mac, {"mac": mac})
 
@@ -587,6 +649,29 @@ async def update_device(mac: str, update: DeviceUpdate, auth=Depends(verify_toke
     devices[mac] = device
     save_json(DEVICES_FILE, devices)
     return device
+
+@app.post("/api/devices/{mac}/kick")
+async def kick_device(mac: str, auth=Depends(verify_token)):
+    """Déconnecte immédiatement un appareil du WiFi (deauth)."""
+    mac_norm = normalize_mac(mac)
+    rc, out, err = run_cmd(f"hostapd_cli -i wlan0 deauthenticate {mac_norm} 2>/dev/null")
+    return {"ok": rc == 0, "mac": mac_norm, "detail": out or err}
+
+@app.get("/api/debug/iptables")
+async def debug_iptables(auth=Depends(verify_token)):
+    """Retourne les règles iptables actives (pour diagnostic)."""
+    _, forward, _ = run_cmd("iptables -L FORWARD -n -v 2>/dev/null")
+    _, nat, _     = run_cmd("iptables -t nat -L POSTROUTING -n -v 2>/dev/null")
+    _, input_, _  = run_cmd("iptables -L INPUT -n -v 2>/dev/null")
+    _, dns_conf, _ = run_cmd("cat /etc/guardianpi/blocked_domains.conf 2>/dev/null || echo '(vide)'")
+    _, dnsmasq_status, _ = run_cmd("systemctl is-active dnsmasq 2>/dev/null")
+    return {
+        "forward_rules": forward,
+        "input_rules": input_,
+        "nat_rules": nat,
+        "blocked_domains_conf": dns_conf[:2000],
+        "dnsmasq_active": dnsmasq_status.strip() == "active",
+    }
 
 # ─────────────────────────────────────────────
 # ROUTES RÈGLES
