@@ -388,7 +388,6 @@ Type=oneshot
 RemainAfterExit=yes
 ExecStart=/bin/bash -c '\
     rfkill unblock wifi 2>/dev/null || true; \
-    pkill -f "wpa_supplicant.*wlan0" 2>/dev/null || true; \
     ip addr flush dev ${AP_IF} 2>/dev/null || true; \
     ip addr add ${AP_IP}/24 dev ${AP_IF}; \
     ip link set ${AP_IF} up'
@@ -402,7 +401,7 @@ EOF
     cat > /etc/systemd/system/dnsmasq.service.d/guardianpi-wait.conf << EOF
 [Unit]
 After=guardianpi-ip.service network-pre.target
-Requires=guardianpi-ip.service
+Wants=guardianpi-ip.service
 
 [Service]
 ExecStartPre=/bin/bash -c 'for i in \$(seq 1 20); do ip addr show ${AP_IF} | grep -q ${AP_IP} && exit 0; sleep 1; done; ip addr add ${AP_IP}/24 dev ${AP_IF}; ip link set ${AP_IF} up'
