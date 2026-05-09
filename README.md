@@ -1,330 +1,194 @@
-# 🛡️ GuardianPi — Routeur Parental Intelligent
+# 🛡️ GuardianPi — Routeur Parental Intelligent (Mode Hotspot WiFi)
 
-**Plug & Play parental control router for home networks**
+**Plug & Play parental control router — Le Pi crée son propre réseau WiFi**
 
-GuardianPi transforme un Raspberry Pi 3B en routeur parental complet, accessible via un beau dashboard web, sans aucune application à installer.
-
----
-
-## 📸 Dashboard
-
-Interface mobile-first, accessible depuis n'importe quel navigateur :
-
-- `http://192.168.1.xxx:8080` (remplacez par votre IP locale)
-- Identifiants par défaut : `admin` / `guardianpi`
+GuardianPi transforme un Raspberry Pi 3B en **point d'accès WiFi** avec contrôle parental complet.
+Les téléphones et tablettes se connectent au réseau "GuardianPi" → le filtrage est automatique, **aucune configuration DNS manuelle nécessaire**.
 
 ---
 
-## ✨ Fonctionnalités
+## 🔑 Pourquoi le Mode Hotspot ?
 
-### Contrôle par appareil
-- 🔴 **Bloquer** instantanément un appareil
-- ⏸️ **Pause internet** en 1 clic
-- 👤 **Profils** : Enfant, Ado, Adulte (avec règles automatiques)
-- 🏷️ **Nommez** vos appareils par prénom
-
-### Filtrage de contenu
-- 🔞 Blocage par catégorie : Adultes, Jeux d'argent, Réseaux sociaux, Streaming, Jeux vidéo, Publicités
-- 🚫 Blocage de sites personnalisés
-- ✅ Liste blanche (toujours autorisé)
-- Filtrage par DNS (transparent, fonctionne sur tout appareil)
-
-### Plannings horaires
-- 📅 Internet uniquement de 18h à 20h du lundi au vendredi
-- Par appareil, par jour de la semaine
-- Coupure automatique hors des plages
-
-### Pause globale
-- ⏸️ Couper internet pour **toute la maison** en 1 clic
-- 🏖️ **Mode vacances** : désactive temporairement toutes les restrictions
-
-### Surveillance réseau
-- Scan automatique des appareils connectés
-- Affichage IP, MAC, nom, statut en ligne/hors ligne
-- Température CPU et uptime du Pi
+| Ancienne approche (DNS) | Nouvelle approche (Hotspot WiFi) |
+|------------------------|----------------------------------|
+| Fonctionne que si chaque appareil configure le Pi comme DNS | Transparent : aucune config sur les téléphones |
+| Impossible sur iOS/Android (champ DNS inaccessible) | Les appareils se connectent au WiFi "GuardianPi" |
+| Contournable en changeant de DNS | Le Pi est la passerelle → tout le trafic passe par lui |
 
 ---
 
-## 🔌 Comment brancher le Raspberry Pi
+## 🏗️ Architecture Réseau
 
 ```
-[Box Internet / Routeur]
-         │
-         │ (câble Ethernet)
-         │
-    [Raspberry Pi 3B]   ← GuardianPi installé ici
-         │
-         │ (WiFi ou second Ethernet)
-         │
-    [Switch / Appareils]
-    ├── PC de bureau
-    ├── iPhone Emma
-    ├── iPad Léo
-    └── TV Salon
+[BOX INTERNET]
+      │
+      │ câble Ethernet (WAN)
+      │
+[RASPBERRY PI 3B]  ← IP fixe sur eth0 (reçue par DHCP depuis la box)
+  hostapd (WiFi AP) → SSID : "GuardianPi"
+  dnsmasq → DHCP : 192.168.4.100–200
+  iptables → NAT wlan0 → eth0 + blocage MAC
+      │
+      │ 📶 WiFi "GuardianPi"
+      │
+  ├── 📱 iPhone Emma  → IP auto 192.168.4.101
+  ├── 📱 iPad Léo     → IP auto 192.168.4.102
+  ├── 💻 Laptop       → IP auto 192.168.4.103
+  └── 📺 TV Salon     → IP auto 192.168.4.104
 ```
 
-Le Raspberry Pi agit comme **passerelle** entre votre box et vos appareils. Tout le trafic passe par lui.
+Quand un appareil se connecte au WiFi "GuardianPi", le Pi lui attribue automatiquement :
+- Une adresse IP (DHCP)
+- Sa propre adresse comme **passerelle** (tout le trafic passe par lui)
+- Sa propre adresse comme **DNS** (filtrage transparent)
 
-> **Alternative simple** : Branchez le Pi entre votre box et votre switch/WiFi existant. Configurez vos appareils pour utiliser l'IP du Pi comme gateway et DNS.
+---
+
+## 📱 Comment ça marche pour l'utilisateur
+
+**Sur le téléphone de l'enfant :**
+1. Réglages → WiFi → choisir **GuardianPi**
+2. Entrer le mot de passe WiFi (configuré dans le dashboard)
+3. Connecté → le filtrage parental est actif automatiquement ✓
+
+**Aucune configuration DNS, aucune app à installer.**
 
 ---
 
 ## 🚀 Installation en 1 commande
 
-Sur votre Raspberry Pi (avec Raspberry Pi OS Lite) :
-
 ```bash
-curl -sSL https://raw.githubusercontent.com/votre-repo/guardianpi/main/scripts/install.sh | sudo bash
+sudo bash install.sh
 ```
 
-**Temps d'installation estimé : 5–10 minutes**
-
-À la fin, le script affiche :
-```
-✅ GuardianPi installé avec succès !
-
-📍 Accédez au dashboard :
-   http://192.168.1.42:8080
-
-🔐 Identifiants par défaut :
-   Utilisateur : admin
-   Mot de passe : guardianpi
-```
+**Prérequis :**
+- Raspberry Pi 3B (ou 3B+, 4) avec WiFi intégré
+- Câble Ethernet branché vers votre box (WAN)
+- Raspberry Pi OS Lite (64-bit recommandé)
+- SSH activé
 
 ---
 
-## 🖥️ Prérequis
+## ✨ Fonctionnalités
 
-| Élément | Requis |
-|---------|--------|
-| Matériel | Raspberry Pi 3B (ou 3B+, 4) |
-| OS | Raspberry Pi OS Lite (64-bit recommandé) |
-| Connexion | Ethernet vers la box |
-| Accès | SSH activé |
+### Gestion du Hotspot WiFi
+- 📶 Création automatique du réseau WiFi "GuardianPi"
+- 🔑 Changement SSID/mot de passe WiFi depuis le dashboard
+- 📊 Voir les appareils connectés en temps réel
+- 🔄 Redémarrage hotspot sans SSH
 
-### Préparer le Raspberry Pi
+### Contrôle par appareil
+- 🔴 **Bloquer** instantanément un appareil (iptables par MAC)
+- ⏸️ **Pause internet** en 1 clic
+- 👤 **Profils** : Enfant, Ado, Adulte
+- 🏷️ Nommer vos appareils
 
-1. Téléchargez [Raspberry Pi Imager](https://www.raspberrypi.com/software/)
-2. Choisissez **Raspberry Pi OS Lite (64-bit)**
-3. Dans les options avancées : activez SSH, définissez nom d'hôte `guardianpi`
-4. Flashez la carte SD
-5. Branchez et démarrez
+### Filtrage de contenu
+- 🔞 Blocage par catégorie (adultes, jeux, réseaux sociaux, streaming, etc.)
+- 🚫 Blocage de sites personnalisés
+- Filtrage DNS transparent (tous les appareils WiFi, sans config)
 
----
-
-## 📁 Structure du projet
-
-```
-guardianpi/
-├── backend/
-│   ├── main.py              # API FastAPI complète
-│   └── requirements.txt
-├── frontend/
-│   └── public/
-│       └── index.html       # Dashboard HTML/CSS/JS (single file)
-├── scripts/
-│   ├── install.sh           # Installation automatique
-│   ├── update.sh            # Mise à jour
-│   └── diagnose.sh          # Diagnostic
-├── docs/
-│   └── SETUP.md
-└── README.md
-```
+### Plannings horaires
+- 📅 Internet uniquement sur des plages horaires
+- Par appareil, par jour de la semaine
+- Coupure automatique
 
 ---
 
 ## 🔧 Architecture technique
 
+| Composant | Rôle |
+|-----------|------|
+| **hostapd** | Crée le point d'accès WiFi (SSID, WPA2) |
+| **dnsmasq** | Distribue les IPs (DHCP) + filtre les DNS |
+| **iptables** | NAT (WiFi→Internet) + blocage par MAC |
+| **FastAPI** | Backend API + sert le dashboard |
+| **systemd** | Démarrage automatique de tous les services |
+
+### Flux réseau d'un appareil connecté
+
 ```
-┌─────────────────────────────────────────────────────┐
-│                   Raspberry Pi 3B                    │
-│                                                     │
-│  ┌──────────────┐    ┌─────────────────────────┐    │
-│  │   dnsmasq    │    │    FastAPI Backend       │    │
-│  │  (DNS + DHCP)│    │    (port 8080)           │    │
-│  │              │    │                         │    │
-│  │ • Blocage DNS│    │ • API REST              │    │
-│  │ • DHCP local │    │ • Gestion iptables      │    │
-│  └──────────────┘    │ • Plannings (asyncio)   │    │
-│                      │ • Auth JWT              │    │
-│  ┌──────────────┐    └─────────────────────────┘    │
-│  │  iptables    │                                    │
-│  │              │    ┌─────────────────────────┐    │
-│  │ • Block MAC  │    │    Frontend (SPA)       │    │
-│  │ • NAT        │    │    HTML + Tailwind-like │    │
-│  │ • Firewall   │    │    (servi par FastAPI)  │    │
-│  └──────────────┘    └─────────────────────────┘    │
-│                                                     │
-│  ┌─────────────────────────────────────────────┐    │
-│  │           Persistance (JSON + iptables)     │    │
-│  │   /etc/guardianpi/data/                     │    │
-│  │   ├── devices.json                          │    │
-│  │   ├── rules.json                            │    │
-│  │   ├── schedules.json                        │    │
-│  │   └── config.json                           │    │
-│  └─────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────┘
-```
-
-### Composants
-
-| Composant | Technologie | Rôle |
-|-----------|-------------|------|
-| Backend | Python FastAPI | API REST, logique métier |
-| Frontend | HTML/CSS/JS vanilla | Dashboard (aucune dépendance) |
-| DNS Filtering | dnsmasq | Blocage de sites par domaine |
-| IP Filtering | iptables | Blocage par adresse MAC |
-| Persistance | JSON files | Sauvegarde locale robuste |
-| Service | systemd | Démarrage automatique |
-
----
-
-## 🛡️ Sécurité
-
-- 🔐 Authentification par token (session 24h)
-- 🏠 Accès **LAN uniquement** (jamais exposé sur internet)
-- 🔒 HTTPS optionnel avec certificat auto-signé
-- 🔑 Mot de passe hashé (SHA-256)
-- 📵 Aucune télémétrie, aucune donnée envoyée à l'extérieur
-
-### Changer le mot de passe (IMPORTANT)
-
-Via le dashboard : Réglages → Changer le mot de passe
-
-Ou en ligne de commande :
-```bash
-# Sur le Raspberry Pi
-NEW_HASH=$(echo -n 'votre-nouveau-mot-de-passe' | sha256sum | cut -d' ' -f1)
-# Modifier /etc/guardianpi/data/config.json → password_hash
+[Téléphone]
+  → connecte au WiFi "GuardianPi"
+  → reçoit IP 192.168.4.x via DHCP (dnsmasq)
+  → gateway = 192.168.4.1 (Pi)
+  → DNS = 192.168.4.1 (Pi → filtrage)
+  → trafic HTTP/HTTPS → iptables FORWARD → eth0 → box → internet
+  → si MAC bloqué → iptables DROP
+  → si domaine bloqué → dnsmasq retourne 0.0.0.0
 ```
 
 ---
 
-## 📖 Guide d'utilisation
+## 📍 Accès au Dashboard
 
-### Bloquer un appareil (3 clics)
+Depuis un appareil connecté au WiFi GuardianPi :
+```
+http://192.168.4.1:8080
+```
 
-1. Ouvrez le dashboard
-2. Trouvez l'appareil dans la liste
-3. Cliquez le toggle → bloqué immédiatement
-
-### Bloquer TikTok pour tous
-
-1. Onglet **Règles** (🚫)
-2. Section "Réseaux sociaux" → toggle OFF
-3. TikTok, Instagram, Snapchat, Twitter sont bloqués
-
-### Définir des horaires pour l'iPad de Léo
-
-1. Onglet **Planning** (📅)
-2. `+ Ajouter`
-3. Sélectionner `iPad-Léo`
-4. Nom : "Soir semaine", Lun–Ven, 18h00–20h00
-5. `Créer` → Internet disponible uniquement 18h–20h
-
-### Profils automatiques
-
-| Profil | Bloque automatiquement |
-|--------|------------------------|
-| 👶 Enfant | Adultes + Jeux vidéo + Réseaux sociaux |
-| 🧒 Ado | Adultes + Jeux d'argent |
-| 👤 Adulte | Rien (accès complet) |
-
----
-
-## 🔄 Après une coupure de courant
-
-GuardianPi reprend automatiquement :
-- ✅ Service redémarre via systemd
-- ✅ Règles iptables restaurées
-- ✅ Blocages DNS rechargés
-- ✅ Appareils bloqués/en pause restaurés
-
-**Aucune action manuelle nécessaire.**
+Depuis votre réseau principal (box) :
+```
+http://<IP_du_Pi>:8080
+```
 
 ---
 
 ## 🛠️ Commandes utiles
 
 ```bash
-# Voir les logs en temps réel
+# Voir les appareils connectés au WiFi
+cat /var/lib/misc/dnsmasq.leases
+
+# Statut du hotspot
+systemctl status hostapd
+
+# Statut DHCP/DNS
+systemctl status dnsmasq
+
+# Logs temps réel
 journalctl -u guardianpi -f
+journalctl -u hostapd -f
 
-# Redémarrer le service
-sudo systemctl restart guardianpi
+# Redémarrer tout
+sudo systemctl restart hostapd dnsmasq guardianpi
 
-# Voir les appareils connectés
-arp -n
-
-# Diagnostic complet
-sudo bash /opt/guardianpi/scripts/diagnose.sh
-
-# Mise à jour
-sudo bash /opt/guardianpi/scripts/update.sh
-
-# Sauvegarder la configuration
-cp -r /etc/guardianpi /tmp/guardianpi-backup-$(date +%Y%m%d)
+# Voir les règles de blocage MAC
+sudo iptables -L FORWARD -n -v
 ```
 
 ---
 
 ## 🐛 Dépannage
 
-### Dashboard inaccessible
+### Le WiFi "GuardianPi" n'apparaît pas
 ```bash
-# Vérifier que le service tourne
-systemctl status guardianpi
-
-# Vérifier le port
-ss -tlnp | grep 8080
-
-# Logs d'erreur
-journalctl -u guardianpi -n 50
+systemctl status hostapd
+journalctl -u hostapd -n 30
+# Vérifier que wlan0 existe
+ip link show wlan0
 ```
 
-### DNS ne filtre pas
+### Les appareils ne reçoivent pas d'IP
 ```bash
-# Vérifier dnsmasq
 systemctl status dnsmasq
-
-# Tester le DNS
-dig @192.168.100.1 facebook.com
-
-# Voir les domaines bloqués
-cat /etc/guardianpi/blocked_domains.conf
+# Vérifier l'IP statique de wlan0
+ip addr show wlan0
+# Elle doit être 192.168.4.1/24
 ```
 
-### Appareil non détecté
+### Pas d'internet sur les appareils connectés
 ```bash
-# Scan manuel
-sudo nmap -sn 192.168.100.0/24
+# Vérifier le forwarding
+cat /proc/sys/net/ipv4/ip_forward
+# Doit afficher : 1
 
-# Table ARP
-arp -n
+# Vérifier le NAT
+sudo iptables -t nat -L POSTROUTING -n -v
+# Doit avoir une règle MASQUERADE sur eth0
 ```
-
----
-
-## 📦 FAQ
-
-**Q: Fonctionne-t-il avec le WiFi de la box ?**  
-R: Oui — vos appareils se connectent à votre WiFi normal, et le Pi intercepte le trafic via iptables/DNS.
-
-**Q: Peut-on bypasser les blocages ?**  
-R: Le blocage DNS peut être contourné avec un VPN. Le blocage MAC via iptables est plus robuste. Pour les enfants, c'est suffisant.
-
-**Q: Le Pi ralentit-il internet ?**  
-R: Négligeable. Le Pi 3B gère facilement 100 Mbps, largement suffisant pour une maison.
-
-**Q: Fonctionne-t-il sans internet ?**  
-R: Le LAN fonctionne toujours. Le dashboard est accessible même sans internet.
 
 ---
 
 ## 📄 Licence
-
-MIT License — Libre d'utilisation, modification et distribution.
-
----
-
-*GuardianPi — Protégez votre famille, simplement.*
+MIT — Libre d'utilisation, modification et distribution.

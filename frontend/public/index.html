@@ -738,6 +738,10 @@ body::before {
       <span>GuardianPi</span>
     </div>
     <div class="topbar-actions">
+      <div class="status-pill" id="wifi-pill" title="Hotspot WiFi GuardianPi">
+        <div class="status-dot" id="wifi-dot" style="background:var(--text3)"></div>
+        <span id="wifi-ssid-label">WiFi…</span>
+      </div>
       <div class="status-pill">
         <div class="status-dot" id="global-dot"></div>
         <span id="online-count">0 en ligne</span>
@@ -767,14 +771,14 @@ body::before {
 
       <!-- Stats -->
       <div class="stats-row">
+        <div class="stat-card" id="stat-wifi-card" style="cursor:pointer" onclick="showView('settings');setTimeout(()=>document.getElementById('wifi-settings-group').scrollIntoView({behavior:'smooth'}),150)">
+          <div class="stat-label">WiFi</div>
+          <div class="stat-value" style="font-size:16px" id="stat-wifi-clients">—</div>
+          <div class="stat-sub" id="stat-wifi-ssid" style="color:var(--green);font-size:10px">●  GuardianPi</div>
+        </div>
         <div class="stat-card">
           <div class="stat-label">En ligne</div>
           <div class="stat-value" id="stat-online">—</div>
-          <div class="stat-sub">appareils</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Bloqués</div>
-          <div class="stat-value" id="stat-blocked">—</div>
           <div class="stat-sub">appareils</div>
         </div>
         <div class="stat-card">
@@ -885,12 +889,69 @@ body::before {
 
     <!-- VIEW: SETTINGS -->
     <div class="view" id="view-settings">
-      <div class="settings-group">
-        <div class="section-header"><span class="section-title">Système</span></div>
+
+      <!-- ═══ WiFi HOTSPOT ═══ -->
+      <div class="settings-group" id="wifi-settings-group">
+        <div class="section-header">
+          <span class="section-title">📶 Hotspot WiFi</span>
+          <span id="wifi-status-badge" style="font-size:11px;padding:3px 10px;border-radius:20px;background:var(--green-dim);color:var(--green)">Actif</span>
+        </div>
 
         <div class="settings-item">
           <div>
-            <div class="settings-label">Adresse IP locale</div>
+            <div class="settings-label">Nom du réseau (SSID)</div>
+            <div class="settings-sub">Les appareils voient ce nom WiFi</div>
+          </div>
+          <span id="wifi-ssid-display" style="font-weight:600;color:var(--accent2)">GuardianPi</span>
+        </div>
+
+        <div class="settings-item">
+          <div>
+            <div class="settings-label">Appareils connectés</div>
+            <div class="settings-sub">Actuellement sur le réseau WiFi</div>
+          </div>
+          <span id="wifi-clients-display" style="font-weight:600;color:var(--text)">—</span>
+        </div>
+
+        <div class="settings-item">
+          <div>
+            <div class="settings-label">Adresse IP du Pi (passerelle)</div>
+            <div class="settings-sub">Dashboard : http://<span id="wifi-ap-ip">192.168.4.1</span>:8080</div>
+          </div>
+          <span id="wifi-ip-chip" class="info-chip">192.168.4.1</span>
+        </div>
+
+        <!-- Formulaire de modification WiFi -->
+        <div style="background:var(--surface2);border-radius:var(--radius);padding:16px;margin:8px 0;border:1px solid var(--border)">
+          <div style="font-size:12px;font-weight:600;color:var(--text2);letter-spacing:.5px;margin-bottom:14px">✏️ MODIFIER LE RÉSEAU WIFI</div>
+
+          <div class="form-group">
+            <label class="form-label">Nom du réseau (SSID)</label>
+            <input type="text" class="form-input" id="wifi-edit-ssid" placeholder="GuardianPi" maxlength="32">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Mot de passe WiFi <span style="color:var(--text3)">(min 8 caractères)</span></label>
+            <input type="password" class="form-input" id="wifi-edit-pass" placeholder="Nouveau mot de passe" minlength="8" maxlength="63" autocomplete="new-password">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Canal WiFi <span style="color:var(--text3)">(1–13, défaut : 6)</span></label>
+            <input type="number" class="form-input" id="wifi-edit-channel" placeholder="6" min="1" max="13" style="width:80px">
+          </div>
+
+          <div style="display:flex;gap:8px;margin-top:4px">
+            <button class="btn-primary" style="flex:1" onclick="saveWifiConfig()">💾 Enregistrer</button>
+            <button class="btn-secondary" style="flex:1" onclick="restartHotspot()">🔄 Redémarrer hotspot</button>
+          </div>
+          <div style="font-size:11px;color:var(--text3);margin-top:10px">
+            ⚠️ Après modification, les appareils devront se reconnecter au WiFi avec le nouveau nom/mot de passe.
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <div class="section-header"><span class="section-title">Système</span></div>
             <div class="settings-sub" id="local-ip-display">Chargement...</div>
           </div>
           <div class="info-chip" id="local-ip-chip">—</div>
@@ -929,9 +990,9 @@ body::before {
         <div class="settings-item">
           <div>
             <div class="settings-label">GuardianPi</div>
-            <div class="settings-sub">Routeur parental intelligent v1.0</div>
+            <div class="settings-sub">Routeur parental — Mode Hotspot WiFi v2.0</div>
           </div>
-          <span style="color:var(--text3);font-size:12px">v1.0.0</span>
+          <span style="color:var(--text3);font-size:12px">v2.0.0</span>
         </div>
       </div>
     </div>
@@ -1212,10 +1273,11 @@ document.getElementById('login-pass').addEventListener('keydown', e => {
 // INIT
 // ─────────────────────────────────────────────
 async function initApp() {
-  await Promise.all([loadDevices(), loadStatus(), loadRules(), loadSchedules()]);
+  await Promise.all([loadDevices(), loadStatus(), loadRules(), loadSchedules(), loadWifi()]);
   buildCategoryGrid();
   setInterval(loadStatus, 30000);
   setInterval(loadDevices, 20000);
+  setInterval(loadWifi, 60000);
 }
 
 // ─────────────────────────────────────────────
@@ -1225,19 +1287,40 @@ async function loadStatus() {
   try {
     const s = await api('GET', '/api/global/status');
     if (!s) return;
-    
+
     globalPaused = s.global_pause;
     document.getElementById('stat-temp').textContent = s.cpu_temp + '°';
     document.getElementById('stat-uptime').textContent = s.uptime.replace('up ', '').replace('hours', 'h').replace('minutes', 'min') || '—';
     document.getElementById('local-ip-chip').textContent = s.local_ip || '—';
-    document.getElementById('local-ip-display').textContent = 'http://' + (s.local_ip || '192.168.1.x');
+    document.getElementById('local-ip-display').textContent = 'http://' + (s.local_ip || '192.168.4.1') + ':8080';
     document.getElementById('settings-temp').textContent = s.cpu_temp + '°C';
     document.getElementById('online-count').textContent = s.online_devices + ' en ligne';
-    
+    document.getElementById('stat-online').textContent = s.online_devices || '0';
+
+    // Hotspot WiFi status
+    const hotspotOk = s.hotspot_active !== false;
+    const wifiDot = document.getElementById('wifi-dot');
+    const wifiLabel = document.getElementById('wifi-ssid-label');
+    const wifiBadge = document.getElementById('wifi-status-badge');
+    if (wifiDot) wifiDot.style.background = hotspotOk ? 'var(--green)' : 'var(--red)';
+    if (wifiLabel) wifiLabel.textContent = s.ap_ssid || 'GuardianPi';
+    if (wifiBadge) {
+      wifiBadge.textContent = hotspotOk ? 'Actif ✓' : 'Inactif !';
+      wifiBadge.style.background = hotspotOk ? 'var(--green-dim)' : 'var(--red-dim)';
+      wifiBadge.style.color = hotspotOk ? 'var(--green)' : 'var(--red)';
+    }
+    const wifiClientsEl = document.getElementById('stat-wifi-clients');
+    const wifiSsidEl   = document.getElementById('stat-wifi-ssid');
+    if (wifiClientsEl) wifiClientsEl.textContent = (s.wifi_clients || 0) + ' app.';
+    if (wifiSsidEl) {
+      wifiSsidEl.textContent = (hotspotOk ? '● ' : '○ ') + (s.ap_ssid || 'GuardianPi');
+      wifiSsidEl.style.color = hotspotOk ? 'var(--green)' : 'var(--red)';
+    }
+
     // Pause banner
     const banner = document.getElementById('pause-banner');
     banner.classList.toggle('active', globalPaused);
-    
+
     const pauseBtn = document.getElementById('global-pause-btn');
     if (globalPaused) {
       pauseBtn.querySelector('strong').textContent = 'Reprendre internet';
@@ -1249,6 +1332,71 @@ async function loadStatus() {
       pauseBtn.querySelector('.qb-icon').textContent = '⏸️';
     }
   } catch(e) { console.warn('Status error:', e); }
+}
+
+// ─────────────────────────────────────────────
+// WIFI / HOTSPOT
+// ─────────────────────────────────────────────
+let wifiConfig = {};
+
+async function loadWifi() {
+  try {
+    const w = await api('GET', '/api/wifi');
+    if (!w) return;
+    wifiConfig = w;
+    const ssidEl     = document.getElementById('wifi-ssid-display');
+    const clientsEl  = document.getElementById('wifi-clients-display');
+    const apIpEl     = document.getElementById('wifi-ap-ip');
+    const apIpChip   = document.getElementById('wifi-ip-chip');
+    const editSsid   = document.getElementById('wifi-edit-ssid');
+    const editChan   = document.getElementById('wifi-edit-channel');
+    if (ssidEl)    ssidEl.textContent    = w.ssid || 'GuardianPi';
+    if (clientsEl) clientsEl.textContent = (w.wifi_clients || w.dhcp_leases?.length || 0) + ' appareil(s)';
+    if (apIpEl)    apIpEl.textContent    = w.ap_ip || '192.168.4.1';
+    if (apIpChip)  apIpChip.textContent  = w.ap_ip || '192.168.4.1';
+    if (editSsid)  editSsid.placeholder  = w.ssid || 'GuardianPi';
+    if (editChan)  editChan.placeholder  = w.channel || 6;
+  } catch(e) { console.warn('Wifi load error:', e); }
+}
+
+async function saveWifiConfig() {
+  const ssid   = document.getElementById('wifi-edit-ssid').value.trim();
+  const pass   = document.getElementById('wifi-edit-pass').value;
+  const chan   = parseInt(document.getElementById('wifi-edit-channel').value) || null;
+
+  if (!ssid && !pass && !chan) {
+    toast('Remplissez au moins un champ à modifier', 'error'); return;
+  }
+  if (pass && pass.length < 8) {
+    toast('Mot de passe WiFi trop court (min 8 caractères)', 'error'); return;
+  }
+
+  const payload = {};
+  if (ssid) payload.ssid = ssid;
+  if (pass) payload.passphrase = pass;
+  if (chan) payload.channel = chan;
+
+  try {
+    const r = await api('PUT', '/api/wifi', payload);
+    toast('WiFi mis à jour ! Les appareils doivent se reconnecter.', 'success');
+    document.getElementById('wifi-edit-pass').value = '';
+    document.getElementById('wifi-edit-ssid').value = '';
+    document.getElementById('wifi-edit-channel').value = '';
+    await loadWifi();
+    await loadStatus();
+  } catch(e) {
+    toast('Erreur : ' + (e.message || 'mise à jour échouée'), 'error');
+  }
+}
+
+async function restartHotspot() {
+  try {
+    await api('POST', '/api/wifi/restart');
+    toast('Hotspot redémarré ✓', 'success');
+    setTimeout(loadStatus, 3000);
+  } catch(e) {
+    toast('Erreur redémarrage', 'error');
+  }
 }
 
 // ─────────────────────────────────────────────
