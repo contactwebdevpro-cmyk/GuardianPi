@@ -293,7 +293,13 @@ def get_ap_ip() -> str:
     return get_config().get("ap_ip", "192.168.4.1")
 
 def rebuild_dnsmasq_blocklist():
-    """Reconstruit la liste de blocage DNS."""
+    """Reconstruit la liste de blocage DNS.
+
+    FIX syntaxe dnsmasq :
+      - address=/domain/0.0.0.0 couvre déjà domain ET tous ses sous-domaines
+        (l'ancienne ligne address=/.domain/0.0.0.0 était invalide et ignorée)
+      - Ajout du blocage IPv6 (::) sinon les appareils passent par AAAA
+    """
     rules = load_json(RULES_FILE, [])
     blocked_domains = set()
     for rule in rules:
@@ -306,14 +312,12 @@ def rebuild_dnsmasq_blocklist():
 
     lines = []
     for domain in sorted(blocked_domains):
-        lines.append(f"address=/{domain}/0.0.0.0")
-        lines.append(f"address=/.{domain}/0.0.0.0")
+        lines.append(f"address=/{domain}/0.0.0.0")  # IPv4 + tous sous-domaines
+        lines.append(f"address=/{domain}/::")         # IPv6
 
     BLOCKED_DOMAINS_FILE.parent.mkdir(parents=True, exist_ok=True)
     BLOCKED_DOMAINS_FILE.write_text("\n".join(lines) + "\n")
 
-    # Toujours restart (pas reload) — reload ne relit pas conf-file de manière fiable
-    # et ne vide pas le cache DNS (crucial pour le déblocage)
     run_cmd("systemctl restart dnsmasq 2>/dev/null")
     import time as _time; _time.sleep(1)
 
@@ -401,6 +405,44 @@ async def startup_event():
     asyncio.create_task(schedule_checker())
     restore_state()
 
+
+def setup_dns_intercept(ap_if: str = "wlan0"):
+    """Force tout le trafic DNS des appareils à passer par dnsmasq du Pi.
+
+    Sans ces règles, les appareils peuvent contourner le blocage en utilisant
+    leur propre DNS (8.8.8.8 codé en dur, DoH, etc.).
+
+    - Redirige tout UDP/TCP port 53 venant du WiFi vers le Pi lui-même
+    - Bloque DNS-over-TLS (port 853) pour éviter le contournement
+    - Bloque les IPs des principaux serveurs DoH/DoT connus
+    """
+    # Supprimer les règles existantes pour éviter les doublons
+    run_cmd(f"iptables -t nat -D PREROUTING -i {ap_if} -p udp --dport 53 -j REDIRECT --to-port 53 2>/dev/null")
+    run_cmd(f"iptables -t nat -D PREROUTING -i {ap_if} -p tcp --dport 53 -j REDIRECT --to-port 53 2>/dev/null")
+
+    # Rediriger TOUT le DNS (port 53) vers le Pi → dnsmasq intercepte tout
+    run_cmd(f"iptables -t nat -A PREROUTING -i {ap_if} -p udp --dport 53 -j REDIRECT --to-port 53")
+    run_cmd(f"iptables -t nat -A PREROUTING -i {ap_if} -p tcp --dport 53 -j REDIRECT --to-port 53")
+
+    # Bloquer DNS-over-TLS (port 853) — contournement chiffré
+    run_cmd(f"iptables -D FORWARD -i {ap_if} -p tcp --dport 853 -j DROP 2>/dev/null")
+    run_cmd(f"iptables -D FORWARD -i {ap_if} -p udp --dport 853 -j DROP 2>/dev/null")
+    run_cmd(f"iptables -A FORWARD -i {ap_if} -p tcp --dport 853 -j DROP")
+    run_cmd(f"iptables -A FORWARD -i {ap_if} -p udp --dport 853 -j DROP")
+
+    # Bloquer les IPs des serveurs DoH/DoT les plus utilisés
+    doh_ips = [
+        "1.1.1.1", "1.0.0.1",       # Cloudflare
+        "8.8.8.8", "8.8.4.4",       # Google
+        "9.9.9.9", "149.112.112.112", # Quad9
+        "208.67.222.222", "208.67.220.220",  # OpenDNS
+    ]
+    for ip in doh_ips:
+        run_cmd(f"iptables -D FORWARD -i {ap_if} -d {ip} -p udp --dport 53 -j DROP 2>/dev/null")
+        run_cmd(f"iptables -D FORWARD -i {ap_if} -d {ip} -p tcp --dport 53 -j DROP 2>/dev/null")
+        run_cmd(f"iptables -A FORWARD -i {ap_if} -d {ip} -p udp --dport 53 -j DROP")
+        run_cmd(f"iptables -A FORWARD -i {ap_if} -d {ip} -p tcp --dport 53 -j DROP")
+
 def restore_state():
     """Restaure l'état au démarrage du service.
     
@@ -426,6 +468,10 @@ def restore_state():
     run_cmd(f"iptables -A INPUT -i {ap} -p udp --dport 67 -j ACCEPT 2>/dev/null || true")
     run_cmd("iptables -A INPUT -i lo -j ACCEPT 2>/dev/null || true")
     run_cmd("iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true")
+
+    # Intercepter tout le DNS des appareils → ils ne peuvent plus contourner le blocage
+    config2 = get_config()
+    setup_dns_intercept(config2.get("interface_ap", "wlan0"))
 
     # Réappliquer les blocages par appareil
     devices = load_json(DEVICES_FILE, {})
@@ -570,6 +616,8 @@ async def restart_hotspot(auth=Depends(verify_token)):
     """Redémarre le hotspot WiFi (utile après un problème de connexion)."""
     run_cmd("systemctl restart hostapd 2>/dev/null")
     run_cmd("systemctl restart dnsmasq 2>/dev/null")
+    config = get_config()
+    setup_dns_intercept(config.get("interface_ap", "wlan0"))
     return {"ok": True, "message": "Hotspot redémarré"}
 
 # ─────────────────────────────────────────────
